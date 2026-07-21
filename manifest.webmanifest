@@ -1,7 +1,7 @@
 {
   "name": "SOXL V4 방어형 계산기",
   "short_name": "SOXL V4 방어형",
-  "description": "SOXL V4 방어형 계산기 - 22/22/Q1/3, 급락 익일 0.25T LOC, MA200 15/10/5 리버스 매수, 매도차수별 고정금 버킷",
+  "description": "SOXL V4 방어형 계산기 - 22/22/Q1/3, 급락 익일 0.25T LOC, MA200 85% 기준 25/5 리버스 매수, 매도차수별 고정금 버킷",
   "lang": "ko-KR",
   "start_url": "./index.html",
   "scope": "./",

@@ -113,7 +113,10 @@
     const s = settings(inputSettings);
     const prev = previousClose(priorCloses);
     const c = num(close, 0);
-    return prev != null && prev > 0 && c > 0 && c / prev - 1 <= s.crashThreshold;
+    if (!(prev != null && prev > 0 && c > 0)) return false;
+    const thresholdPrice = prev * (1 + s.crashThreshold);
+    const tolerance = Math.max(1e-10, Math.abs(prev) * 1e-12);
+    return c <= thresholdPrice + tolerance;
   }
 
   function ma200WithCurrent(priorCloses, close){
@@ -164,8 +167,7 @@
       return { ma200, ratio: 0.25, zone: '원문 V4 · 버킷별 25%' };
     }
     if (ma200 == null) return { ma200, ratio: 0.25, zone: 'MA200 데이터 부족 · 버킷별 25%' };
-    if (c >= ma200) return { ma200, ratio: 0.15, zone: 'MA200 이상 · 버킷별 15%' };
-    if (c >= ma200 * 0.85) return { ma200, ratio: 0.10, zone: 'MA200의 85% 이상 · 버킷별 10%' };
+    if (c >= ma200 * 0.85) return { ma200, ratio: 0.25, zone: 'MA200의 85% 이상 · 버킷별 25%' };
     return { ma200, ratio: 0.05, zone: 'MA200의 85% 미만 · 버킷별 5%' };
   }
 

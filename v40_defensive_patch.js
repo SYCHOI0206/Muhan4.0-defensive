@@ -289,19 +289,19 @@
       const last=R.prior.length?R.prior[R.prior.length-1].close:null;
       const ma=last!=null?Core.ma200WithCurrent(priorValues(R.prior.slice(0,-1)),last):null;
       const buckets=Core.ensureReverseBuckets(a),bucketRemain=buckets.reduce((sum,b)=>sum+b.remaining,0);
-      box.innerHTML=`<b>SOXL V4 방어형 상태</b> · 급락 익일 주문 ${a.pendingCrashFollowup?'<span class="red">예약됨</span>':'없음'} · MA200 ${ma==null?'데이터 부족':price(ma)} · 리버스 버킷 ${buckets.length}개 (${money(bucketRemain)})<br><span class="small">급락일 정상매수 체결 후 다음 거래일은 0.25T 단일 LOC로 대체하며, 리버스 매수는 매도차수별 버킷에 당일 MA200 비율 15/10/5%를 적용하며, 체결 시 T도 같은 당일 비율만큼 남은 T 공간을 회복합니다.</span>`;
+      box.innerHTML=`<b>SOXL V4 방어형 상태</b> · 급락 익일 주문 ${a.pendingCrashFollowup?'<span class="red">예약됨</span>':'없음'} · MA200 ${ma==null?'데이터 부족':price(ma)} · 리버스 버킷 ${buckets.length}개 (${money(bucketRemain)})<br><span class="small">급락일 정상매수 체결 후 다음 거래일은 0.25T 단일 LOC로 대체하며, 리버스 매수는 매도차수별 버킷에 당일 MA200 85% 기준 25/5%를 적용하며, 체결 시 T도 같은 당일 비율만큼 남은 T 공간을 회복합니다.</span>`;
     }
   };
 
   function updateStaticUi(){
     document.title='SOXL V4 방어형 계산기 · 리버스 버킷 · 22/22/Q1/3';
     const h1=document.querySelector('.title h1');if(h1)h1.textContent='SOXL V4 방어형 계산기';
-    const sub=document.querySelector('.subtitle');if(sub)sub.textContent='22% 별지점 · 22% 전량목표 · 쿼터 1/3 · 급락 익일 0.25T LOC · MA200 15/10/5 · 리버스 버킷';
+    const sub=document.querySelector('.subtitle');if(sub)sub.textContent='22% 별지점 · 22% 전량목표 · 쿼터 1/3 · 급락 익일 0.25T LOC · MA200 85% 기준 25/5 · 리버스 버킷';
     const badge=document.querySelector('.badge');if(badge)badge.textContent='DEFENSIVE BUCKET';
     const rules=document.querySelector('#rules tbody');
     if(rules&&!document.getElementById('defensiveRuleRows')){
       const marker=document.createElement('tbody');marker.id='defensiveRuleRows';
-      rules.insertAdjacentHTML('beforeend','<tr><th>당일 상태</th><td>별지점·1회매수금·전반/후반은 당일 시작 T·현금·평단으로 고정</td></tr><tr><th>급락 방어</th><td>종가수익률 -22.5% 이하인 날 정상매수가 체결되면 다음 거래일 정상매수를 0.25T 단일 LOC로 대체</td></tr><tr><th>대체 LOC</th><td>전반: 별지점과 평단가 LOC 중 높은 값, 후반: 별지점 LOC. 미체결 시 당일 소멸</td></tr><tr><th>리버스 버킷</th><td>첫 리버스 매도 후 전체 현금을 1번 버킷으로 만들고, 이후 매도대금마다 독립 버킷 추가. 실제 매수금은 버킷별 비례차감</td></tr><tr><th>리버스 매수</th><td>당일 종가 포함 MA200 이상 15%, 85% 이상 10%, 85% 미만 5%; 200일 미만은 25%. 매수예산과 T 회복률에 동일 적용. T = T + (20-T)×당일 비율</td></tr><tr><th>현금 상한</th><td>모든 매수수량은 floor(예산/가격) 후 실제 보유현금으로 다시 제한</td></tr>');
+      rules.insertAdjacentHTML('beforeend','<tr><th>당일 상태</th><td>별지점·1회매수금·전반/후반은 당일 시작 T·현금·평단으로 고정</td></tr><tr><th>급락 방어</th><td>종가수익률 -22.5% 이하인 날 정상매수가 체결되면 다음 거래일 정상매수를 0.25T 단일 LOC로 대체</td></tr><tr><th>대체 LOC</th><td>전반: 별지점과 평단가 LOC 중 높은 값, 후반: 별지점 LOC. 미체결 시 당일 소멸</td></tr><tr><th>리버스 버킷</th><td>첫 리버스 매도 후 전체 현금을 1번 버킷으로 만들고, 이후 매도대금마다 독립 버킷 추가. 실제 매수금은 버킷별 비례차감</td></tr><tr><th>리버스 매수</th><td>당일 종가 포함 MA200의 85% 이상은 25%, 85% 미만은 5%; 200일 미만은 25%. 매수예산과 T 회복률에 동일 적용. T = T + (20-T)×당일 비율</td></tr><tr><th>현금 상한</th><td>모든 매수수량은 floor(예산/가격) 후 실제 보유현금으로 다시 제한</td></tr>');
     }
   }
 
