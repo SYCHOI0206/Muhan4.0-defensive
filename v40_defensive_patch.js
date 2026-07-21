@@ -58,7 +58,7 @@
     a.pendingCrashFollowup=false;
     const ev=[];
 
-    if(a.pendingNormal){a.mode='NORMAL';a.pendingNormal=false;a.revFirst=false;ev.push('리버스 일반모드 복귀');}
+    if(a.pendingNormal){a.mode='NORMAL';a.pendingNormal=false;a.revFirst=false;Core.clearReverseBuckets(a);ev.push('리버스 일반모드 복귀 · 버킷 정리');}
     if(a.mode==='REVERSE' && due){due=false;ev.push('급락 익일 0.25T 주문 취소 · 리버스모드');}
 
     const act=rec.action||'AUTO';
@@ -70,8 +70,10 @@
       if(due) ev.push('급락 익일 0.25T LOC 미체결 · 수동 종가저장');
       ev.push('종가만 기록');
     }else if(act==='NORMAL_RETURN'){
-      a.mode='NORMAL';a.pendingNormal=false;a.revFirst=false;ev.push('수동: 리버스 일반복귀');
+      a.mode='NORMAL';a.pendingNormal=false;a.revFirst=false;Core.clearReverseBuckets(a);ev.push('수동: 리버스 일반복귀 · 버킷 정리');
     }else if(isNormalBuyAction(act) || act==='REV_BUY'){
+      const reverseInfo=act==='REV_BUY'?Core.reverseBudgetInfo(a,p,pv,s):null;
+      if(reverseInfo)q=Math.min(q,Math.floor(reverseInfo.budget/p));
       q=Core.capQty(a,p,q);
       const bought=Core.buy(a,q,p);
       if(bought>0){
@@ -79,8 +81,13 @@
         else if(act==='FRONT_별지점_BUY'||act==='FRONT_평단가_BUY')a.T=dayT+0.5;
         else if(act==='FRONT_BOTH_BUY'||act==='BACK_별지점_BUY')a.T=dayT+1;
         else if(act===ACTION_CRASH)a.T=dayT+s.followupT;
-        else if(act==='REV_BUY'){a.mode='REVERSE';a.revFirst=false;a.T=dayT+(s.split-dayT)*0.25;}
+        else if(act==='REV_BUY'){
+          a.mode='REVERSE';a.revFirst=false;
+          Core.allocateReverseBuyCost(a,bought*p,reverseInfo,s);
+          a.T=dayT+(s.split-dayT)*reverseInfo.ratio;
+        }
         ev.push(`수동: ${actionLabel(act)} ${bought}주 @ ${price(p)} · T ${a.T.toFixed(2)}`);
+        if(reverseInfo)ev.push(`리버스 버킷 ${reverseInfo.bucketCount}개 · ${(reverseInfo.ratio*100).toFixed(0)}% 적용`);
         if(isNormalBuyAction(act) && crash){a.pendingCrashFollowup=true;ev.push('급락일 매수 체결 · 다음 거래일 0.25T LOC 예약');}
       }else ev.push(`수동: ${actionLabel(act)} · 0주`);
     }else if(isSellAction(act)){
@@ -90,7 +97,17 @@
         if(act==='FULL_SELL'){ev.push(`수동: 전량매도 ${sold}주 @ ${price(p)}`);Core.resetPosition(a);}
         else{
           if(act==='QUARTER_SELL')a.T=dayT*(1-s.quarter);
-          if(act==='REV_FIRST_SELL'||act==='REV_SELL'){a.mode='REVERSE';a.revFirst=false;a.T=dayT*0.9;}
+          if(act==='REV_FIRST_SELL'){
+            a.mode='REVERSE';a.revFirst=false;a.T=dayT*0.9;
+            Core.clearReverseBuckets(a);
+            const b=Core.addReverseBucket(a,a.cash);
+            ev.push(`수동: 첫 리버스 버킷 ${b?b.id:'-'}번 · ${money(a.cash)}`);
+          }else if(act==='REV_SELL'){
+            a.mode='REVERSE';a.revFirst=false;a.T=dayT*0.9;
+            const proceeds=sold*p;
+            const b=Core.addReverseBucket(a,proceeds);
+            ev.push(`수동: 추가 리버스 버킷 ${b?b.id:'-'}번 · ${money(proceeds)}`);
+          }
           ev.push(`수동: ${actionLabel(act)} ${sold}주 @ ${price(p)} · T ${a.T.toFixed(2)}`);
           if(a.shares<=0)Core.resetPosition(a);
         }
@@ -98,7 +115,7 @@
     }
 
     if(rec.manualTOn){const mt=Number(rec.manualT);if(Number.isFinite(mt)){a.T=mt;ev.push(`T 직접입력 → ${a.T.toFixed(2)}`);}}
-    if(isNormalBuyAction(act)&&a.shares>0&&a.T>s.split-1){a.mode='REVERSE';a.revFirst=true;ev.push(`리버스 진입 예약 · T ${a.T.toFixed(2)}`);}
+    if(isNormalBuyAction(act)&&a.shares>0&&a.T>s.split-1){a.mode='REVERSE';a.revFirst=true;Core.clearReverseBuckets(a);ev.push(`리버스 진입 예약 · T ${a.T.toFixed(2)}`);}
     return ev.length?ev:['수동 처리 없음'];
   }
 
@@ -162,7 +179,7 @@
     const orders=Core.buildOrders(a,pv,s);
     const found=[...orders.buys,...orders.sells].find(x=>x.action===act);
     if(found&&found.q!=null)return Math.max(0,Math.floor(found.q));
-    if(act==='REV_BUY'){const bi=Core.reverseBudgetInfo(a,px,pv);return Math.floor(Math.min(bi.budget,a.cash)/px);}
+    if(act==='REV_BUY'){const bi=Core.reverseBudgetInfo(a,px,pv,s);return Math.floor(Math.min(bi.budget,a.cash)/px);}
     if(act==='FULL_SELL')return a.shares;
     return '';
   };
@@ -271,19 +288,20 @@
     if(box){
       const last=R.prior.length?R.prior[R.prior.length-1].close:null;
       const ma=last!=null?Core.ma200WithCurrent(priorValues(R.prior.slice(0,-1)),last):null;
-      box.innerHTML=`<b>방어형 상태</b> · 급락 익일 주문 ${a.pendingCrashFollowup?'<span class="red">예약됨</span>':'없음'} · MA200 ${ma==null?'데이터 부족':price(ma)}<br><span class="small">급락일 정상매수는 원문대로 체결하고, 다음 거래일 정상매수를 0.25T 단일 LOC로 대체합니다.</span>`;
+      const buckets=Core.ensureReverseBuckets(a),bucketRemain=buckets.reduce((sum,b)=>sum+b.remaining,0);
+      box.innerHTML=`<b>SOXL V4 방어형 상태</b> · 급락 익일 주문 ${a.pendingCrashFollowup?'<span class="red">예약됨</span>':'없음'} · MA200 ${ma==null?'데이터 부족':price(ma)} · 리버스 버킷 ${buckets.length}개 (${money(bucketRemain)})<br><span class="small">급락일 정상매수 체결 후 다음 거래일은 0.25T 단일 LOC로 대체하며, 리버스 매수는 매도차수별 버킷에 당일 MA200 비율 15/10/5%를 적용하며, 체결 시 T도 같은 당일 비율만큼 남은 T 공간을 회복합니다.</span>`;
     }
   };
 
   function updateStaticUi(){
-    document.title='원문 V4.0 방어형 계산기 · 22/22/Q1/3 · D+1 0.25T · MA200 리버스';
-    const h1=document.querySelector('.title h1');if(h1)h1.textContent='원문 V4.0 방어형 계산기';
-    const sub=document.querySelector('.subtitle');if(sub)sub.textContent='22% 별지점 · 22% 전량목표 · 쿼터 1/3 · 급락 익일 0.25T LOC · MA200 리버스';
-    const badge=document.querySelector('.badge');if(badge)badge.textContent='DEFENSIVE LOC';
+    document.title='SOXL V4 방어형 계산기 · 리버스 버킷 · 22/22/Q1/3';
+    const h1=document.querySelector('.title h1');if(h1)h1.textContent='SOXL V4 방어형 계산기';
+    const sub=document.querySelector('.subtitle');if(sub)sub.textContent='22% 별지점 · 22% 전량목표 · 쿼터 1/3 · 급락 익일 0.25T LOC · MA200 15/10/5 · 리버스 버킷';
+    const badge=document.querySelector('.badge');if(badge)badge.textContent='DEFENSIVE BUCKET';
     const rules=document.querySelector('#rules tbody');
     if(rules&&!document.getElementById('defensiveRuleRows')){
       const marker=document.createElement('tbody');marker.id='defensiveRuleRows';
-      rules.insertAdjacentHTML('beforeend','<tr><th>당일 상태</th><td>별지점·1회매수금·전반/후반은 당일 시작 T·현금·평단으로 고정</td></tr><tr><th>급락 방어</th><td>종가수익률 -22.5% 이하인 날 정상매수가 체결되면 다음 거래일 정상매수를 0.25T 단일 LOC로 대체</td></tr><tr><th>대체 LOC</th><td>전반: 별지점과 평단가 LOC 중 높은 값, 후반: 별지점 LOC. 미체결 시 당일 소멸</td></tr><tr><th>리버스 매수</th><td>당일 종가 포함 MA200 이상 15%, 85% 이상 10%, 85% 미만 5%; 200일 미만은 원문 현금 25%</td></tr><tr><th>현금 상한</th><td>모든 매수수량은 floor(예산/가격) 후 실제 보유현금으로 다시 제한</td></tr>');
+      rules.insertAdjacentHTML('beforeend','<tr><th>당일 상태</th><td>별지점·1회매수금·전반/후반은 당일 시작 T·현금·평단으로 고정</td></tr><tr><th>급락 방어</th><td>종가수익률 -22.5% 이하인 날 정상매수가 체결되면 다음 거래일 정상매수를 0.25T 단일 LOC로 대체</td></tr><tr><th>대체 LOC</th><td>전반: 별지점과 평단가 LOC 중 높은 값, 후반: 별지점 LOC. 미체결 시 당일 소멸</td></tr><tr><th>리버스 버킷</th><td>첫 리버스 매도 후 전체 현금을 1번 버킷으로 만들고, 이후 매도대금마다 독립 버킷 추가. 실제 매수금은 버킷별 비례차감</td></tr><tr><th>리버스 매수</th><td>당일 종가 포함 MA200 이상 15%, 85% 이상 10%, 85% 미만 5%; 200일 미만은 25%. 매수예산과 T 회복률에 동일 적용. T = T + (20-T)×당일 비율</td></tr><tr><th>현금 상한</th><td>모든 매수수량은 floor(예산/가격) 후 실제 보유현금으로 다시 제한</td></tr>');
     }
   }
 

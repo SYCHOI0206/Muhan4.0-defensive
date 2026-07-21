@@ -12,7 +12,9 @@
     target: 22,
     quarter: 1 / 3,
     crashThreshold: -0.225,
-    followupT: 0.25
+    followupT: 0.25,
+    reverseProfile: 'DEFENSIVE',
+    reverseBucketAllocation: 'PROPORTIONAL'
   });
 
   function num(v, fallback){
@@ -29,6 +31,8 @@
     s.quarter = num(s.quarter, DEFAULTS.quarter);
     s.crashThreshold = num(s.crashThreshold, DEFAULTS.crashThreshold);
     s.followupT = num(s.followupT, DEFAULTS.followupT);
+    s.reverseProfile = String(s.reverseProfile || DEFAULTS.reverseProfile).toUpperCase();
+    s.reverseBucketAllocation = String(s.reverseBucketAllocation || DEFAULTS.reverseBucketAllocation).toUpperCase();
     return s;
   }
 
@@ -44,6 +48,8 @@
       revFirst: false,
       pendingNormal: false,
       pendingCrashFollowup: false,
+      reverseBuckets: [],
+      reverseBucketSeq: 0,
       cycleDay: 0
     };
   }
@@ -64,6 +70,8 @@
     state.revFirst = false;
     state.pendingNormal = false;
     state.pendingCrashFollowup = false;
+    state.reverseBuckets = [];
+    state.reverseBucketSeq = 0;
     state.cycle = num(state.cycle, 1) + 1;
     state.cycleDay = 0;
   }
@@ -116,25 +124,122 @@
     return window.reduce((a, b) => a + b, 0) / 200;
   }
 
-  function reverseBudgetInfo(state, close, priorCloses){
+  function ensureReverseBuckets(state){
+    if (!Array.isArray(state.reverseBuckets)) state.reverseBuckets = [];
+    state.reverseBuckets = state.reverseBuckets
+      .map((b, i) => ({
+        id: b && b.id != null ? b.id : i + 1,
+        principal: Math.max(0, num(b && b.principal, 0)),
+        remaining: Math.max(0, num(b && b.remaining, num(b && b.principal, 0)))
+      }))
+      .filter(b => b.principal > 1e-9 && b.remaining > 1e-9);
+    state.reverseBucketSeq = Math.max(
+      Math.floor(num(state.reverseBucketSeq, 0)),
+      ...state.reverseBuckets.map(b => Math.floor(num(b.id, 0))),
+      0
+    );
+    return state.reverseBuckets;
+  }
+
+  function clearReverseBuckets(state){
+    state.reverseBuckets = [];
+    state.reverseBucketSeq = 0;
+  }
+
+  function addReverseBucket(state, principal){
+    const amount = Math.max(0, num(principal, 0));
+    if (amount <= 1e-9) return null;
+    ensureReverseBuckets(state);
+    state.reverseBucketSeq += 1;
+    const bucket = { id: state.reverseBucketSeq, principal: amount, remaining: amount };
+    state.reverseBuckets.push(bucket);
+    return bucket;
+  }
+
+  function reverseRatioInfo(close, priorCloses, inputSettings){
+    const s = settings(inputSettings);
     const c = num(close, 0);
     const ma200 = ma200WithCurrent(priorCloses, c);
-    let ratio;
-    let zone;
-    if (ma200 == null) {
-      ratio = 0.25;
-      zone = 'MA200 데이터 부족 · 원문 현금 25%';
-    } else if (c >= ma200) {
-      ratio = 0.15;
-      zone = 'MA200 이상 · 현금 15%';
-    } else if (c >= ma200 * 0.85) {
-      ratio = 0.10;
-      zone = 'MA200의 85% 이상 · 현금 10%';
-    } else {
-      ratio = 0.05;
-      zone = 'MA200의 85% 미만 · 현금 5%';
+    if (s.reverseProfile === 'ORIGINAL') {
+      return { ma200, ratio: 0.25, zone: '원문 V4 · 버킷별 25%' };
     }
-    return { ma200, ratio, budget: Math.max(0, state.cash) * ratio, zone };
+    if (ma200 == null) return { ma200, ratio: 0.25, zone: 'MA200 데이터 부족 · 버킷별 25%' };
+    if (c >= ma200) return { ma200, ratio: 0.15, zone: 'MA200 이상 · 버킷별 15%' };
+    if (c >= ma200 * 0.85) return { ma200, ratio: 0.10, zone: 'MA200의 85% 이상 · 버킷별 10%' };
+    return { ma200, ratio: 0.05, zone: 'MA200의 85% 미만 · 버킷별 5%' };
+  }
+
+  function reverseBudgetInfo(state, close, priorCloses, inputSettings){
+    const ratioInfo = reverseRatioInfo(close, priorCloses, inputSettings);
+    const buckets = ensureReverseBuckets(state);
+    const parts = buckets.map(b => ({
+      id: b.id,
+      principal: b.principal,
+      remaining: b.remaining,
+      requested: Math.min(b.remaining, b.principal * ratioInfo.ratio)
+    })).filter(x => x.requested > 1e-9);
+    const planned = parts.reduce((sum, x) => sum + x.requested, 0);
+    const budget = Math.min(Math.max(0, num(state.cash, 0)), planned);
+    return {
+      ma200: ratioInfo.ma200,
+      ratio: ratioInfo.ratio,
+      zone: ratioInfo.zone,
+      budget,
+      planned,
+      parts,
+      bucketCount: buckets.length,
+      totalPrincipal: buckets.reduce((sum, b) => sum + b.principal, 0),
+      totalRemaining: buckets.reduce((sum, b) => sum + b.remaining, 0)
+    };
+  }
+
+  function allocateReverseBuyCost(state, cost, budgetInfo, inputSettings){
+    const s = settings(inputSettings);
+    const buckets = ensureReverseBuckets(state);
+    const parts = budgetInfo && Array.isArray(budgetInfo.parts) ? budgetInfo.parts : [];
+    let remainingCost = Math.max(0, num(cost, 0));
+    if (remainingCost <= 1e-9 || !parts.length) return 0;
+    const byId = new Map(buckets.map(b => [String(b.id), b]));
+    const totalRequested = parts.reduce((sum, x) => sum + Math.max(0, num(x.requested, 0)), 0);
+    if (totalRequested <= 1e-9) return 0;
+    let allocated = 0;
+
+    if (s.reverseBucketAllocation === 'FIFO') {
+      for (const part of parts) {
+        if (remainingCost <= 1e-9) break;
+        const bucket = byId.get(String(part.id));
+        if (!bucket) continue;
+        const take = Math.min(bucket.remaining, Math.max(0, num(part.requested, 0)), remainingCost);
+        bucket.remaining -= take;
+        remainingCost -= take;
+        allocated += take;
+      }
+    } else {
+      let open = parts.slice();
+      while (remainingCost > 1e-8 && open.length) {
+        const openTotal = open.reduce((sum, x) => sum + Math.max(0, num(x.requested, 0)), 0);
+        if (openTotal <= 1e-9) break;
+        let usedThisRound = 0;
+        const next = [];
+        for (const part of open) {
+          const bucket = byId.get(String(part.id));
+          if (!bucket || bucket.remaining <= 1e-9) continue;
+          const share = remainingCost * Math.max(0, num(part.requested, 0)) / openTotal;
+          const cap = Math.min(bucket.remaining, Math.max(0, num(part.requested, 0)));
+          const take = Math.min(cap, share);
+          bucket.remaining -= take;
+          usedThisRound += take;
+          allocated += take;
+          if (cap - take > 1e-8) next.push({ ...part, requested: cap - take });
+        }
+        if (usedThisRound <= 1e-9) break;
+        remainingCost -= usedThisRound;
+        open = next;
+      }
+    }
+
+    state.reverseBuckets = buckets.filter(b => b.remaining > 1e-7);
+    return allocated;
   }
 
   function startDaySnapshot(state, inputSettings){
@@ -181,6 +286,7 @@
       state.mode = 'NORMAL';
       state.pendingNormal = false;
       state.revFirst = false;
+      clearReverseBuckets(state);
       events.push(event('NORMAL_RESUME', '리버스 일반모드 복귀'));
     }
 
@@ -299,15 +405,21 @@
       if (state.shares > 0 && state.T > s.split - 1) {
         state.mode = 'REVERSE';
         state.revFirst = true;
+        clearReverseBuckets(state);
         events.push(event('REVERSE_ENTER', `리버스 진입 · T ${state.T.toFixed(2)}`));
       }
     } else {
       if (state.revFirst) {
         const q = Math.floor(state.shares / 10);
         const sold = sell(state, q, c);
+        const firstPrincipal = Math.max(0, state.cash);
+        clearReverseBuckets(state);
+        const bucket = addReverseBucket(state, firstPrincipal);
         if (sold > 0) {
           state.T *= 0.9;
-          events.push(event('REVERSE_FIRST_SELL', `리버스 첫날 매도 ${sold}주`, { action: 'REV_FIRST_SELL', qty: sold, price: c }));
+          events.push(event('REVERSE_FIRST_SELL', `리버스 첫날 매도 ${sold}주 · 1번 버킷 ${firstPrincipal.toFixed(2)}`, { action: 'REV_FIRST_SELL', qty: sold, price: c, bucketPrincipal: firstPrincipal, bucketId: bucket && bucket.id }));
+        } else {
+          events.push(event('REVERSE_FIRST_SELL_0', `리버스 첫날 매도 0주 · 기존 현금 버킷 ${firstPrincipal.toFixed(2)}`));
         }
         state.revFirst = false;
       } else {
@@ -317,17 +429,24 @@
           events.push(event('REVERSE_EXIT_PENDING', '리버스 탈출 신호 · 다음 거래일 일반복귀'));
         } else if (revStar != null && c >= revStar) {
           const q = Math.floor(state.shares / 10);
+          const cashBefore = state.cash;
           const sold = sell(state, q, c);
           if (sold > 0) {
+            const proceeds = state.cash - cashBefore;
+            const bucket = addReverseBucket(state, proceeds);
             state.T *= 0.9;
-            events.push(event('REVERSE_SELL', `리버스 매도 ${sold}주`, { action: 'REV_SELL', qty: sold, price: c, revStar }));
+            events.push(event('REVERSE_SELL', `리버스 매도 ${sold}주 · ${bucket ? bucket.id : '-'}번 버킷 ${proceeds.toFixed(2)}`, { action: 'REV_SELL', qty: sold, price: c, revStar, bucketPrincipal: proceeds, bucketId: bucket && bucket.id }));
           }
         } else if (revStar != null && c <= revStar - 0.01) {
-          const info = reverseBudgetInfo(state, c, prior);
+          const info = reverseBudgetInfo(state, c, prior, s);
           const q = buy(state, Math.floor(info.budget / c), c);
           if (q > 0) {
-            state.T = state.T + (s.split - state.T) * 0.25;
-            events.push(event('REVERSE_BUY', `리버스 매수 ${q}주 · ${info.zone}`, { action: 'REV_BUY', qty: q, price: c, budget: info.budget, ma200: info.ma200, ratio: info.ratio, revStar }));
+            const cost = q * c;
+            allocateReverseBuyCost(state, cost, info, s);
+            state.T = state.T + (s.split - state.T) * info.ratio;
+            events.push(event('REVERSE_BUY', `리버스 매수 ${q}주 · ${info.zone} · ${info.bucketCount}개 버킷`, { action: 'REV_BUY', qty: q, price: c, budget: info.budget, cost, ma200: info.ma200, ratio: info.ratio, revStar, bucketCount: info.bucketCount, bucketRemaining: ensureReverseBuckets(state).reduce((sum, b) => sum + b.remaining, 0) }));
+          } else {
+            events.push(event('REVERSE_BUY_0', `리버스 매수 신호 · ${info.zone} · 예산 또는 정수주 부족`, { budget: info.budget, ratio: info.ratio, bucketCount: info.bucketCount }));
           }
         }
       }
@@ -369,8 +488,8 @@
       }
       sells.push({ name: '리버스 매도', kind: 'sell', action: 'REV_SELL', px: revStar, q: Math.floor(work.shares / 10), desc: '직전 5일 평균 이상 · 보유수량 1/10' });
       const buyPx = revStar - 0.01;
-      const info = reverseBudgetInfo(work, last, prior.slice(0, -1));
-      buys.push({ name: '리버스 매수', kind: 'buy', action: 'REV_BUY', px: buyPx, q: Math.floor(info.budget / buyPx), budget: info.budget, desc: `${info.zone} · 실제 비중은 체결 종가 포함 MA200으로 확정` });
+      const info = reverseBudgetInfo(work, last, prior.slice(0, -1), s);
+      buys.push({ name: '리버스 매수', kind: 'buy', action: 'REV_BUY', px: buyPx, q: Math.floor(info.budget / buyPx), budget: info.budget, desc: `${info.zone} · 활성 버킷 ${info.bucketCount}개 · 체결 종가 포함 MA200으로 최종 확정` });
       return { sells, buys };
     }
 
@@ -416,7 +535,12 @@
     previousClose,
     isCrashDay,
     ma200WithCurrent,
+    ensureReverseBuckets,
+    clearReverseBuckets,
+    addReverseBucket,
+    reverseRatioInfo,
     reverseBudgetInfo,
+    allocateReverseBuyCost,
     startDaySnapshot,
     processDay,
     buildOrders

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'muhan-v40-defensive-loc-v2';
+const CACHE_NAME = 'soxl-v4-defensive-bucket-v4';
 const APP_SHELL = [
   './',
   './index.html',
