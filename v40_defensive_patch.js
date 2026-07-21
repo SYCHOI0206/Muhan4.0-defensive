@@ -6,6 +6,7 @@
   }
 
   const Core = window.V40DefensiveCore;
+  window.__V40_DEFENSIVE_PATCH_ACTIVE__ = true;
   const ACTION_CRASH = 'CRASH_FOLLOWUP_BUY';
   window.__v40ManualChoice = false;
 
@@ -91,6 +92,7 @@
         if(isNormalBuyAction(act) && crash){a.pendingCrashFollowup=true;ev.push('급락일 매수 체결 · 다음 거래일 0.25T LOC 예약');}
       }else ev.push(`수동: ${actionLabel(act)} · 0주`);
     }else if(isSellAction(act)){
+      if(act==='FULL_SELL') q=a.shares;
       q=Math.min(q,a.shares);
       const sold=Core.sell(a,q,p);
       if(sold>0){

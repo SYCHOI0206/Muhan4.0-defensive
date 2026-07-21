@@ -370,7 +370,7 @@
           const requestedAvg = Math.floor(half / c);
           const avgQ = buy(state, requestedAvg, c);
           if (starQ > 0 || avgQ > 0) {
-            state.T += 1;
+            state.T += 0.5 * Number(starQ > 0) + 0.5 * Number(avgQ > 0);
             buyHappened = true;
             if (starQ > 0) events.push(event('STAR_BUY_HALF', `별지점 매수 ${starQ}주`, { action: 'FRONT_별지점_BUY', qty: starQ, price: c, budget: half }));
             if (avgQ > 0) events.push(event('AVG_BUY_HALF', `평단가 매수 ${avgQ}주`, { action: 'FRONT_평단가_BUY', qty: avgQ, price: c, budget: half }));

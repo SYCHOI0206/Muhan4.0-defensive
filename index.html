@@ -1442,5 +1442,13 @@ function simpleBuyExtraRows(x){
 
 <script src="./v40_defensive_core.js"></script>
 <script src="./v40_defensive_patch.js"></script>
+<script>
+(function(){
+  if (!window.V40DefensiveCore || !window.__V40_DEFENSIVE_PATCH_ACTIVE__) {
+    document.body.innerHTML = '<main style="max-width:680px;margin:40px auto;padding:24px;font-family:system-ui"><h1>방어형 핵심 로직을 불러오지 못했습니다.</h1><p>v40_defensive_core.js와 v40_defensive_patch.js가 같은 폴더에 있는지 확인한 뒤 새로고침하세요.</p></main>';
+    throw new Error('SOXL V4 defensive core/patch load failure');
+  }
+})();
+</script>
 </body>
 </html>

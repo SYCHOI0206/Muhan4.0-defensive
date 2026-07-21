@@ -77,3 +77,9 @@ GitHub 적용 방법
 - 급락일 정상매수 체결 후 익일 0.25배 예산 예약 통과
 - 익일 체결 시 T +0.25 통과
 - 실제 SOXL 전체 백테스트 기준 25/5 결과는 VALIDATION.txt 참조
+
+v6 추가 검증
+- 실제 SOXL 4,113거래일과 합성연장 6,289거래일을 배포 JS core와 기준 Python 엔진으로 일별 교차검증
+- mode, T, cash, shares, avg_price, equity 및 이벤트 순서 불일치 0건
+- 자세한 결과: VERIFICATION_REPORT_2026-07-21.txt
+- 배포용 ZIP에는 tests 폴더를 제외했고, 감사용 ZIP에는 재검증 스크립트를 포함함
