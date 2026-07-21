@@ -7,6 +7,7 @@
 
   const Core = window.V40DefensiveCore;
   window.__V40_DEFENSIVE_PATCH_ACTIVE__ = true;
+  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v7-manual-qty';
   const ACTION_CRASH = 'CRASH_FOLLOWUP_BUY';
   window.__v40ManualChoice = false;
 
@@ -196,6 +197,24 @@
     return {act:'AUTO',qty:'',px:c,title,line,before,after,events:r.events};
   };
 
+  function promoteTypedQtyToRecommendedAction(){
+    const qtyEl=$('m_tradeQty');
+    if(!qtyEl || qtyEl.value==='') return {typed:false,promoted:false};
+    const c=Number($('m_close').value),dateVal=$('m_date').value||today();
+    if(!(c>0)) return {typed:true,promoted:false};
+    const current=$('m_manualAction').value||'AUTO';
+    if(window.__v40ManualChoice && current!=='AUTO') return {typed:true,promoted:true,action:current};
+    const st=stateBeforeDate(dateVal);
+    const act=recommendedManualAction(st.a,c,st.prior);
+    if(!act || act==='AUTO' || act==='CLOSE_ONLY' || act==='NORMAL_RETURN') return {typed:true,promoted:false,action:act||'AUTO'};
+    const rawQty=qtyEl.value;
+    window.__v40ManualChoice=true;
+    $('m_manualAction').value=act;
+    if(!$('m_tradePrice').value) $('m_tradePrice').value=c.toFixed(2);
+    qtyEl.value=Math.max(0,Math.floor(Number(rawQty)||0));
+    return {typed:true,promoted:true,action:act};
+  }
+
   window.autoSelectFromClose = function(){
     if(!$('m_close'))return;
     if(!window.__v40ManualChoice){$('m_manualAction').value='AUTO';$('m_tradePrice').value='';$('m_tradeQty').value='';}
@@ -214,6 +233,7 @@
   };
 
   window.updateSelectedAction = function(){
+    promoteTypedQtyToRecommendedAction();
     const c=Number($('m_close').value),dateVal=$('m_date').value||today();
     if(!window.__v40ManualChoice){
       const r=inferAutoAction(dateVal,c);
@@ -229,6 +249,7 @@
 
   window.estimateTForInput = function(){
     if(!$('autoTPreview'))return;
+    promoteTypedQtyToRecommendedAction();
     const dateVal=$('m_date').value||today(),c=Number($('m_close').value),st=stateBeforeDate(dateVal),before=st.a.T;
     if(!(c>0)){$('autoTPreview').textContent='—';return;}
     if(!window.__v40ManualChoice){const r=inferAutoAction(dateVal,c);$('autoTPreview').textContent=`${before.toFixed(2)} → ${r.after.T.toFixed(2)}`;return;}
@@ -254,6 +275,7 @@
   window.openSheet = function(){
     window.__v40ManualChoice=false;
     syncModalFromMain();
+    window.__v40ManualChoice=false;
     $('m_manualAction').value='AUTO';$('m_tradePrice').value='';$('m_tradeQty').value='';
     updateSelectedAction();estimateTForInput();fillModalChoices();
     $('recordSheet').classList.add('open');$('recordSheet').setAttribute('aria-hidden','false');
@@ -261,6 +283,11 @@
   };
 
   window.modalSave = function(){
+    const promoted=promoteTypedQtyToRecommendedAction();
+    if(promoted.typed && !promoted.promoted){
+      alert('입력한 수량을 적용할 단일 추천 거래가 없습니다. 아래에서 매수 또는 매도 종류를 직접 선택해 주세요.');
+      return;
+    }
     if(!window.__v40ManualChoice){$('m_manualAction').value='AUTO';$('m_tradePrice').value='';$('m_tradeQty').value='';}
     syncMainFromModal();addRecord();closeSheet();
   };
