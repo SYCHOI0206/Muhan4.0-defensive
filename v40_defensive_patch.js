@@ -7,7 +7,7 @@
 
   const Core = window.V40DefensiveCore;
   window.__V40_DEFENSIVE_PATCH_ACTIVE__ = true;
-  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v7-manual-qty';
+  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v8-reference-ui-manual-qty';
   const ACTION_CRASH = 'CRASH_FOLLOWUP_BUY';
   window.__v40ManualChoice = false;
 
@@ -38,6 +38,7 @@
   const baseActionLabel = window.actionLabel;
   window.actionLabel = function(a){
     if (a === ACTION_CRASH) return '급락 익일 0.25T 매수';
+    if (a === 'FRONT_BOTH_BUY') return '별+평단 매수';
     return baseActionLabel(a);
   };
   window.actionOptions = function(val){
@@ -163,9 +164,29 @@
       x.key=(x.name||'order')+'_'+(x.action||'AUTO');
       if(x.action===ACTION_CRASH||x.action==='REV_BUY')x.noLadder=true;
     }
+
+    // Reference index UI: keep compact order rows and the +1-share LOC ladder.
+    const s=settingsNow();
+    const star=out.buys.find(x=>x.action==='FRONT_별지점_BUY');
+    const avg=out.buys.find(x=>x.action==='FRONT_평단가_BUY');
+    if(star&&avg){
+      const unit=a.cash/Math.max(0.000001,s.split-a.T);
+      star.noLadder=true;
+      avg.avgLadder=true;
+      avg.avgLimit=avg.px;
+      avg.avgQty=avg.q;
+      avg.ladderUnit=unit;
+      avg.ladderBaseTotal=Math.max(0,Math.floor(Number(star.q)||0))+Math.max(0,Math.floor(Number(avg.q)||0));
+    }
+
     const quarter=out.sells.find(x=>x.action==='QUARTER_SELL');
     const full=out.sells.find(x=>x.action==='FULL_SELL');
-    if(full&&quarter){full.recordQty=a.shares;full.q=Math.max(0,a.shares-quarter.q);full.desc='쿼터 주문과 합산해 보유수량 초과 방지';}
+    if(full){
+      full.name=`${s.target}% 지정가`;
+      full.recordQty=a.shares;
+      if(quarter)full.q=Math.max(0,a.shares-quarter.q);
+      full.desc='쿼터 주문과 합산해 보유수량 초과 방지';
+    }
     return out;
   };
 
@@ -173,7 +194,12 @@
     const preview=clone(a);
     const r=Core.processDay(preview,close,priorValues(prior),settingsNow());
     const acts=r.events.map(e=>e.action).filter(Boolean);
-    return acts.length===1?acts[0]:'AUTO';
+    const unique=[...new Set(acts)];
+    const hasStar=unique.includes('FRONT_별지점_BUY');
+    const hasAvg=unique.includes('FRONT_평단가_BUY');
+    const otherTrades=unique.filter(x=>!['FRONT_별지점_BUY','FRONT_평단가_BUY'].includes(x));
+    if(hasStar&&hasAvg&&otherTrades.length===0)return 'FRONT_BOTH_BUY';
+    return unique.length===1?unique[0]:'AUTO';
   };
 
   window.calcQtyForAction = function(act,p,dateVal){
@@ -189,12 +215,26 @@
 
   window.inferAutoAction = function(dateVal,closeVal){
     const st=stateBeforeDate(dateVal||today()),before=clone(st.a),after=clone(st.a),c=Number(closeVal);
-    if(!(c>0))return {act:'AUTO',qty:'',px:'',title:'종가 입력 대기',line:'종가를 입력하면 방어형 전체 로직을 미리 계산합니다.',before,after,events:[]};
+    if(!(c>0))return {act:'AUTO',qty:'',px:'',title:'종가 입력 대기',line:'종가를 입력하면 오늘 거래를 계산합니다.',before,after,events:[]};
     const r=Core.processDay(after,c,priorValues(st.prior),settingsNow());
-    const meaningful=r.events.filter(e=>!['CRASH_FOLLOWUP_ORDER'].includes(e.code));
-    const title=meaningful.length?meaningful.map(e=>e.text).join(' + '):'거래 없음';
-    const line=`T ${before.T.toFixed(2)} → ${after.T.toFixed(2)} · 현금 ${money(before.cash)} → ${money(after.cash)}${after.pendingCrashFollowup?' · 0.25T 예약':''}`;
-    return {act:'AUTO',qty:'',px:c,title,line,before,after,events:r.events};
+    const trades=r.events.filter(e=>e.action&&e.code!=='CRASH_FOLLOWUP_ORDER');
+    const acts=[...new Set(trades.map(e=>e.action))];
+    const hasStar=acts.includes('FRONT_별지점_BUY'),hasAvg=acts.includes('FRONT_평단가_BUY');
+    let suggestedAction='AUTO',title='거래 없음',totalQty=0;
+    if(hasStar&&hasAvg&&acts.every(x=>['FRONT_별지점_BUY','FRONT_평단가_BUY'].includes(x))){
+      suggestedAction='FRONT_BOTH_BUY';
+      totalQty=trades.reduce((sum,e)=>sum+(Number(e.qty)||0),0);
+      title=`별+평단 매수 ${totalQty}주`;
+    }else if(trades.length===1){
+      suggestedAction=trades[0].action||'AUTO';
+      totalQty=Number(trades[0].qty)||0;
+      title=`${actionLabel(suggestedAction)}${totalQty?` ${totalQty}주`:''}`;
+    }else if(trades.length>1){
+      totalQty=trades.reduce((sum,e)=>sum+(Number(e.qty)||0),0);
+      title=trades.map(e=>actionLabel(e.action)).join(' + ');
+    }
+    const line=`T ${before.T.toFixed(2)} → ${after.T.toFixed(2)}${after.pendingCrashFollowup?' · 0.25T 예약':''}`;
+    return {act:'AUTO',suggestedAction,qty:totalQty||'',px:c,title,line,before,after,events:r.events};
   };
 
   function promoteTypedQtyToRecommendedAction(){
@@ -261,13 +301,29 @@
   window.fillModalChoices = function(){
     if(!$('modalChoices'))return;
     const dateVal=$('m_date').value||today(),c=Number($('m_close').value),st=stateBeforeDate(dateVal),ord=currentOrders(st.a,st.prior),items=[];
-    items.push('<div class="choiceTitle">오늘 자동 처리</div>');
-    if(c>0){const r=inferAutoAction(dateVal,c);items.push(`<button type="button" class="choice selected" data-mact="AUTO"><strong>${esc(r.title)}</strong><small>${esc(r.line)}</small><span class="tag">자동</span></button>`);}
-    else items.push('<div class="note">종가를 입력하면 전량·쿼터·정상매수·급락 익일 0.25T·리버스 순서를 한 번에 계산합니다.</div>');
-    const add=(title,arr,cls)=>{if(!arr.length)return;items.push(`<div class="choiceTitle">${title}</div>`);for(const x of arr){items.push(`<button type="button" class="choice ${cls}" data-mact="${x.action}" data-mprice="${x.px==null?'':x.px}" data-mqty="${x.q==null?'':x.q}"><strong>${esc(x.name)}</strong><small>${x.px==null?'—':price(x.px)}${x.q!=null?' × '+qty(x.q)+'주':''}</small><span class="tag hideQtyTag">수동</span></button>`);}};
-    add('직접 선택: 매수',ord.buys.filter(x=>x.action!=='AUTO'),'buyChoice');
-    add('직접 선택: 매도',ord.sells.filter(x=>x.action!=='AUTO'),'sellChoice');
-    items.push('<div class="choiceTitle">기타</div><button type="button" class="choice" data-mact="CLOSE_ONLY"><strong>종가만 저장</strong><small>전략 거래를 적용하지 않음</small><span class="tag hideQtyTag">수동</span></button>');
+    items.push('<div class="choiceTitle">오늘 추천</div>');
+    if(c>0){
+      const r=inferAutoAction(dateVal,c);
+      const qtxt=r.qty?` × ${qty(r.qty)}주`:'';
+      items.push(`<button type="button" class="choice selected" data-mact="AUTO"><strong>${esc(r.title)}</strong><small>${price(c)}${qtxt}</small><span class="tag">${esc(r.line)}</span></button>`);
+    }else items.push('<div class="note">종가를 입력하면 오늘 거래를 자동 계산합니다.</div>');
+
+    const add=(title,arr,cls)=>{
+      if(!arr.length)return;
+      items.push(`<div class="choiceTitle">${title}</div>`);
+      for(const x of arr){
+        items.push(`<button type="button" class="choice ${cls}" data-mact="${x.action}" data-mprice="${x.px==null?'':x.px}" data-mqty="${x.q==null?'':x.q}"><strong>${esc(x.name)}</strong><small>${x.px==null?'—':price(x.px)}${x.q!=null?' × '+qty(x.q)+'주':''}</small><span class="tag hideQtyTag">선택</span></button>`);
+        if(x.kind==='buy'&&typeof simpleBuyExtraRows==='function'){
+          const extras=simpleBuyExtraRows(x)||[];
+          for(const r of extras){
+            items.push(`<div class="choice ladderChoice"><strong>+1주 LOC</strong><small>${price(r.px)}</small><span class="tag hideQtyTag">총 ${qty(r.total||((x.q||0)+1))}주</span></div>`);
+          }
+        }
+      }
+    };
+    add('매수',ord.buys.filter(x=>x.action!=='AUTO'),'buyChoice');
+    add('매도',ord.sells.filter(x=>x.action!=='AUTO'),'sellChoice');
+    items.push('<div class="choiceTitle">기타</div><button type="button" class="choice" data-mact="CLOSE_ONLY"><strong>종가만 저장</strong><small>거래 없음</small><span class="tag hideQtyTag">저장</span></button>');
     $('modalChoices').innerHTML=items.join('');
     document.querySelectorAll('[data-mact]').forEach(b=>b.onclick=()=>setModalAction(b.dataset.mact,b.dataset.mprice,b.dataset.mqty));
   };
@@ -285,7 +341,7 @@
   window.modalSave = function(){
     const promoted=promoteTypedQtyToRecommendedAction();
     if(promoted.typed && !promoted.promoted){
-      alert('입력한 수량을 적용할 단일 추천 거래가 없습니다. 아래에서 매수 또는 매도 종류를 직접 선택해 주세요.');
+      alert('오늘은 여러 거래가 함께 발생하는 날입니다. 아래 매수·매도 줄에서 적용할 거래를 선택해 주세요.');
       return;
     }
     if(!window.__v40ManualChoice){$('m_manualAction').value='AUTO';$('m_tradePrice').value='';$('m_tradeQty').value='';}
@@ -318,14 +374,21 @@
       const last=R.prior.length?R.prior[R.prior.length-1].close:null;
       const ma=last!=null?Core.ma200WithCurrent(priorValues(R.prior.slice(0,-1)),last):null;
       const buckets=Core.ensureReverseBuckets(a),bucketRemain=buckets.reduce((sum,b)=>sum+b.remaining,0);
-      box.innerHTML=`<b>SOXL V4 방어형 상태</b> · 급락 익일 주문 ${a.pendingCrashFollowup?'<span class="red">예약됨</span>':'없음'} · MA200 ${ma==null?'데이터 부족':price(ma)} · 리버스 버킷 ${buckets.length}개 (${money(bucketRemain)})<br><span class="small">급락일 정상매수 체결 후 다음 거래일은 0.25T 단일 LOC로 대체하며, 리버스 매수는 매도차수별 버킷에 당일 MA200 85% 기준 25/5%를 적용하며, 체결 시 T도 같은 당일 비율만큼 남은 T 공간을 회복합니다.</span>`;
+      box.innerHTML=`<b>방어형</b> · 급락예약 ${a.pendingCrashFollowup?'<span class="red">있음</span>':'없음'} · MA200 ${ma==null?'—':price(ma)} · 버킷 ${buckets.length}개`;
     }
   };
+
+  function ensureReferenceUiStyle(){
+    if(document.getElementById('v8ReferenceUiStyle'))return;
+    const st=document.createElement('style');st.id='v8ReferenceUiStyle';
+    st.textContent='.choice.ladderChoice{padding:8px 12px;margin:-3px 0 5px;background:#eaf7f1;border-color:#d7efe2;cursor:default}.choice.ladderChoice strong{font-size:13px;color:#5f596d}.choice.ladderChoice small{font-size:13px;font-weight:950;color:#2c9a73}.choice.ladderChoice .tag{font-size:11px}.recTop .line{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.choice small{margin-left:auto;white-space:nowrap}.choiceTitle{margin-top:8px}';
+    document.head.appendChild(st);
+  }
 
   function updateStaticUi(){
     document.title='SOXL V4 방어형 계산기 · 리버스 버킷 · 22/22/Q1/3';
     const h1=document.querySelector('.title h1');if(h1)h1.textContent='SOXL V4 방어형 계산기';
-    const sub=document.querySelector('.subtitle');if(sub)sub.textContent='22% 별지점 · 22% 전량목표 · 쿼터 1/3 · 급락 익일 0.25T LOC · MA200 85% 기준 25/5 · 리버스 버킷';
+    const sub=document.querySelector('.subtitle');if(sub)sub.textContent='22/22 · 쿼터 1/3 · 급락 0.25T · 리버스 25/5';
     const badge=document.querySelector('.badge');if(badge)badge.textContent='DEFENSIVE BUCKET';
     const rules=document.querySelector('#rules tbody');
     if(rules&&!document.getElementById('defensiveRuleRows')){
@@ -342,6 +405,7 @@
     if($('modalCloseOnly'))$('modalCloseOnly').onclick=()=>{setModalAction('CLOSE_ONLY');modalSave();};
   }
 
+  ensureReferenceUiStyle();
   updateStaticUi();
   rebind();
   render();
