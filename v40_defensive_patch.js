@@ -7,7 +7,7 @@
 
   const Core = window.V40DefensiveCore;
   window.__V40_DEFENSIVE_PATCH_ACTIVE__ = true;
-  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v8-reference-ui-manual-qty';
+  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v9-simple-record-single-ladder';
   const ACTION_CRASH = 'CRASH_FOLLOWUP_BUY';
   window.__v40ManualChoice = false;
 
@@ -348,6 +348,198 @@
     syncMainFromModal();addRecord();closeSheet();
   };
 
+
+  /* v9 simple record workflow
+     - visible automatic recommendation card removed
+     - close input calculates one-unit buy quantity (editable)
+     - combined front-half buy uses pooled one-unit budget / close
+     - direct buy/sell selection is optional and collapsed
+     - no warning popup for combined star+average buy
+  */
+  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v9-simple-record-single-ladder';
+  window.__v40QtyEdited = false;
+
+  function unitAmountForState(a,s){
+    return a.shares>0 ? a.cash/Math.max(0.000001,s.split-a.T) : a.cash/s.split;
+  }
+  function simpleRecordPlan(dateVal,closeVal){
+    const st=stateBeforeDate(dateVal||today()),a=st.a,s=settingsNow(),pv=priorValues(st.prior),c=Number(closeVal);
+    const unit=unitAmountForState(a,s);
+    const refQty=c>0?Math.floor(Math.min(unit,a.cash)/c):0;
+    if(!(c>0))return {action:'AUTO',qty:'',price:'',unit,refQty:0,before:a,after:clone(a),events:[]};
+
+    const after=clone(a);
+    const result=Core.processDay(after,c,pv,s);
+    const trades=result.events.filter(e=>e.action&&e.code!=='CRASH_FOLLOWUP_ORDER');
+    const actions=[...new Set(trades.map(e=>e.action))];
+    const hasStar=actions.includes('FRONT_별지점_BUY');
+    const hasAvg=actions.includes('FRONT_평단가_BUY');
+    let action='CLOSE_ONLY',q=refQty;
+
+    if(hasStar&&hasAvg&&actions.every(x=>['FRONT_별지점_BUY','FRONT_평단가_BUY'].includes(x))){
+      action='FRONT_BOTH_BUY';
+      // Pool both half-budgets so integer-share remainder is not lost.
+      q=Math.floor(Math.min(unit,a.cash)/c);
+    }else if(trades.length===1){
+      action=trades[0].action||'CLOSE_ONLY';
+      if(action==='FIRST_BUY')q=Math.floor(Math.min(a.cash/s.split,a.cash)/c);
+      else if(action==='FRONT_별지점_BUY'||action==='FRONT_평단가_BUY')q=Math.floor(Math.min(unit/2,a.cash)/c);
+      else if(action==='BACK_별지점_BUY')q=Math.floor(Math.min(unit,a.cash)/c);
+      else if(action===ACTION_CRASH)q=Math.floor(Math.min(unit*s.followupT,a.cash)/c);
+      else if(action==='REV_BUY'){
+        const info=Core.reverseBudgetInfo(a,c,pv,s);
+        q=Math.floor(Math.min(info.budget,a.cash)/c);
+      }else q=Math.max(0,Math.floor(Number(trades[0].qty)||0));
+    }else if(trades.length>1){
+      // Keep compound non-buy days on the verified automatic engine.
+      action='AUTO';
+      const buyQty=trades.filter(e=>isNormalBuyAction(e.action)||e.action==='REV_BUY').reduce((sum,e)=>sum+(Number(e.qty)||0),0);
+      q=buyQty||refQty;
+    }
+    return {action,qty:Math.max(0,Math.floor(q||0)),price:c,unit,refQty,before:a,after,events:result.events};
+  }
+
+  function updateQtyNote(plan,c){
+    const el=$('qtyCalcNote');
+    if(!el)return;
+    if(!(c>0)){el.textContent='종가를 입력하면 1회매수금 ÷ 종가로 수량을 계산합니다.';return;}
+    el.textContent=`1회매수금 ${money(plan.unit)} ÷ 종가 ${price(c)} = ${qty(plan.refQty)}주 · 수량은 직접 수정할 수 있습니다.`;
+  }
+
+  window.autoSelectFromClose=function(force){
+    if(!$('m_close'))return;
+    const c=Number($('m_close').value),dateVal=$('m_date').value||today();
+    const plan=simpleRecordPlan(dateVal,c);
+    if(force||!window.__v40QtyEdited){
+      $('m_tradeQty').value=c>0?String(plan.qty):'';
+      window.__v40QtyEdited=false;
+    }
+    if(!window.__v40ManualChoice){
+      $('m_manualAction').value='AUTO';
+      $('m_tradePrice').value='';
+    }
+    updateQtyNote(plan,c);
+    updateSelectedAction();
+    estimateTForInput();
+  };
+
+  window.setModalAction=function(act,priceVal,qtyVal){
+    window.__v40ManualChoice=(act||'AUTO')!=='AUTO';
+    $('m_manualAction').value=act||'AUTO';
+    const c=Number($('m_close').value),dateVal=$('m_date').value||today();
+    if(window.__v40ManualChoice){
+      const p=Number(priceVal||c);
+      $('m_tradePrice').value=p>0?p.toFixed(2):'';
+      const q=calcQtyForAction(act,p,dateVal);
+      $('m_tradeQty').value=q===''?'':String(Math.max(0,Math.floor(q)));
+      window.__v40QtyEdited=false;
+    }else{
+      $('m_tradePrice').value='';
+      const plan=simpleRecordPlan(dateVal,c);
+      $('m_tradeQty').value=c>0?String(plan.qty):'';
+      window.__v40QtyEdited=false;
+    }
+    updateSelectedAction();estimateTForInput();
+  };
+
+  window.updateSelectedAction=function(){
+    const dateVal=$('m_date').value||today(),c=Number($('m_close').value);
+    $('sheetDateLabel').textContent=dateVal;
+    updateQtyNote(simpleRecordPlan(dateVal,c),c);
+  };
+
+  window.estimateTForInput=function(){
+    if(!$('autoTPreview'))return;
+    const dateVal=$('m_date').value||today(),c=Number($('m_close').value),st=stateBeforeDate(dateVal),before=st.a.T;
+    if(!(c>0)){$('autoTPreview').textContent='—';return;}
+    const preview=clone(st.a);
+    if(window.__v40ManualChoice){
+      const act=$('m_manualAction').value||'CLOSE_ONLY',p=Number($('m_tradePrice').value||c),q=Number($('m_tradeQty').value||0);
+      applyManualDay(preview,{action:act,tradePrice:p,tradeQty:q,manualTOn:$('m_manualTOn').checked,manualT:$('m_manualT').value},c,st.prior);
+    }else{
+      const plan=simpleRecordPlan(dateVal,c);
+      if(plan.action==='AUTO')Core.processDay(preview,c,priorValues(st.prior),settingsNow());
+      else applyManualDay(preview,{action:plan.action,tradePrice:c,tradeQty:Number($('m_tradeQty').value||plan.qty||0),manualTOn:$('m_manualTOn').checked,manualT:$('m_manualT').value},c,st.prior);
+    }
+    $('autoTPreview').textContent=`${before.toFixed(2)} → ${preview.T.toFixed(2)}`;
+  };
+
+  window.fillModalChoices=function(){
+    if(!$('modalChoices'))return;
+    const dateVal=$('m_date').value||today(),st=stateBeforeDate(dateVal),ord=currentOrders(st.a,st.prior),items=[];
+    const add=(title,arr,cls)=>{
+      const list=arr.filter(x=>x.action!=='AUTO');
+      if(!list.length)return;
+      items.push(`<div class="choiceTitle">${title}</div>`);
+      for(const x of list){
+        items.push(`<button type="button" class="choice ${cls}" data-mact="${x.action}" data-mprice="${x.px==null?'':x.px}" data-mqty="${x.q==null?'':x.q}"><strong>${esc(x.name)}</strong><small>${x.px==null?'—':price(x.px)}${x.q!=null?' × '+qty(x.q)+'주':''}</small><span class="tag hideQtyTag">선택</span></button>`);
+      }
+    };
+    add('매수',ord.buys,'buyChoice');
+    add('매도',ord.sells,'sellChoice');
+    items.push('<div class="choiceTitle">기타</div><button type="button" class="choice" data-mact="CLOSE_ONLY" data-mprice="" data-mqty=""><strong>종가만 저장</strong><small>거래 없음</small><span class="tag hideQtyTag">선택</span></button>');
+    $('modalChoices').innerHTML=items.join('');
+    document.querySelectorAll('#modalChoices [data-mact]').forEach(b=>b.onclick=()=>setModalAction(b.dataset.mact,b.dataset.mprice,b.dataset.mqty));
+  };
+
+  window.openSheet=function(){
+    window.__v40ManualChoice=false;
+    window.__v40QtyEdited=false;
+    syncModalFromMain();
+    window.__v40ManualChoice=false;
+    $('m_manualAction').value='AUTO';$('m_tradePrice').value='';
+    const c=Number($('m_close').value),plan=simpleRecordPlan($('m_date').value||today(),c);
+    $('m_tradeQty').value=c>0?String(plan.qty):'';
+    updateQtyNote(plan,c);updateSelectedAction();estimateTForInput();fillModalChoices();
+    const details=$('manualTradeDetails');if(details)details.open=false;
+    $('recordSheet').classList.add('open');$('recordSheet').setAttribute('aria-hidden','false');
+    setTimeout(()=>$('m_close').focus(),80);
+  };
+
+  window.modalSave=function(){
+    const dateVal=$('m_date').value||today(),c=Number($('m_close').value);
+    if(!(c>0)){alert('종가를 입력하세요.');return;}
+    if(!window.__v40ManualChoice){
+      const plan=simpleRecordPlan(dateVal,c);
+      $('m_manualAction').value=plan.action;
+      if(plan.action==='AUTO'){
+        $('m_tradePrice').value='';
+        $('m_tradeQty').value='';
+      }else if(plan.action==='CLOSE_ONLY'||plan.action==='NORMAL_RETURN'){
+        $('m_tradePrice').value='';
+        $('m_tradeQty').value='';
+      }else{
+        $('m_tradePrice').value=c.toFixed(2);
+        if($('m_tradeQty').value==='')$('m_tradeQty').value=String(plan.qty||0);
+      }
+    }
+    syncMainFromModal();addRecord();closeSheet();
+  };
+
+  // Guarantee a single LOC ladder: front-half ladder is displayed only once below the average-price row.
+  window.simpleBuyExtraRows=function(x){
+    if(!x||x.kind!=='buy'||x.noLadder)return [];
+    if(x.avgLadder&&typeof ladderRowsFromUnit==='function')return ladderRowsFromUnit(x.ladderUnit,x.ladderBaseTotal,x.avgLimit,7);
+    if((x.action==='FIRST_BUY'||x.action==='BACK_별지점_BUY')&&x.budget&&x.px&&typeof ladderRowsForBudget==='function')return ladderRowsForBudget(x.budget,x.px,x.q,7);
+    return [];
+  };
+
+  window.orderHTML=function(x){
+    const p=x.kind==='buy'?'buy':x.kind==='sell'?'sell':x.kind==='stop'?'stop':'info';
+    const enc=encodeURIComponent(x.key||x.name),qtxt=x.q!=null?`${qty(x.q)}주`:'';
+    const recQty=x.recordQty!=null?x.recordQty:x.q;
+    const btn=x.action==='AUTO'?'':`<button class="secondary quickRecordBtn" data-useorder="${enc}" data-action="${x.action}" data-price="${x.px==null?'':x.px}" data-qty="${recQty==null?'':recQty}" type="button">기록</button>`;
+    let html=`<div class="order ${p} simpleOrder"><div class="simpleLeft"><span class="simpleName">${esc(x.name)}</span><span class="pill ${p}">${p==='buy'?'LOC':p==='sell'?'LOC':p==='stop'?'지정가':'참고'}</span></div><div class="simpleRight"><b>${x.px==null?'—':price(x.px)}</b>${qtxt?`<span>${qtxt}</span>`:''}${btn}</div></div>`;
+    const extras=simpleBuyExtraRows(x);
+    html+=extras.map(r=>`<div class="order buy simpleOrder ladderExtra"><div class="simpleLeft"><span class="simpleName">추가 1주 LOC</span><span class="pill info">LOC</span></div><div class="simpleRight"><b>${price(r.px)}</b><span>총 ${qty(r.total||0)}주</span></div></div>`).join('');
+    return html;
+  };
+
+  const qtyInput=$('m_tradeQty');
+  if(qtyInput)qtyInput.addEventListener('input',function(e){
+    if(e.isTrusted)window.__v40QtyEdited=true;
+  });
+
   const oldCompactTradeLine=window.compactTradeLine;
   window.compactTradeLine=function(row){
     const act=row.rec.action||(row.rec.closeOnly?'CLOSE_ONLY':'AUTO');
@@ -381,7 +573,7 @@
   function ensureReferenceUiStyle(){
     if(document.getElementById('v8ReferenceUiStyle'))return;
     const st=document.createElement('style');st.id='v8ReferenceUiStyle';
-    st.textContent='.choice.ladderChoice{padding:8px 12px;margin:-3px 0 5px;background:#eaf7f1;border-color:#d7efe2;cursor:default}.choice.ladderChoice strong{font-size:13px;color:#5f596d}.choice.ladderChoice small{font-size:13px;font-weight:950;color:#2c9a73}.choice.ladderChoice .tag{font-size:11px}.recTop .line{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.choice small{margin-left:auto;white-space:nowrap}.choiceTitle{margin-top:8px}';
+    st.textContent='.choice.ladderChoice{padding:8px 12px;margin:-3px 0 5px;background:#eaf7f1;border-color:#d7efe2;cursor:default}.choice.ladderChoice strong{font-size:13px;color:#5f596d}.choice.ladderChoice small{font-size:13px;font-weight:950;color:#2c9a73}.choice.ladderChoice .tag{font-size:11px}.choice small{margin-left:auto;white-space:nowrap}.choiceTitle{margin-top:8px}.manualPriceField{display:none!important}.simpleRecordFields{margin-top:2px}.simpleQtyNote{margin-top:9px;padding:10px 12px;border-radius:13px;background:#f7f3ff;border:1px solid #e4dafa;color:#685f7c;font-size:12px;font-weight:850;line-height:1.45}.manualTradeDetails{margin-top:10px;border-top:1px solid #eee7f7;padding-top:8px}.manualTradeDetails>summary{display:flex;align-items:center;justify-content:space-between;padding:8px 2px;color:#746c85}.manualTradeDetails>summary:after{content:"열기";font-size:11px;background:#f1ebfb;color:#6658c8;border-radius:999px;padding:4px 8px}.manualTradeDetails[open]>summary:after{content:"닫기"}.manualTradeDetails .choiceGroup{margin-top:4px}.sheetActions{margin-top:12px}.ladderExtra .simpleName{font-size:13px}.ladderExtra .simpleRight span{font-size:11.5px}';
     document.head.appendChild(st);
   }
 
