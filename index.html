@@ -1461,6 +1461,83 @@ function simpleBuyExtraRows(x){
 </script>
 
 
+
+<!-- YAHOO-SYNCED EXACT-DATE CLOSE FETCH V13
+     Primary: same-origin JSON rebuilt from Yahoo Finance by GitHub Actions.
+     Fallback: direct Yahoo chart request when the browser permits it.
+     No uploaded CSV is used and no other date is substituted. -->
+<script>
+(function(){
+  'use strict';
+  function byId(id){ return document.getElementById(id); }
+  function tickerNow(){
+    try{return String((window.S&&S.settings&&S.settings.ticker)||(byId('ticker')&&byId('ticker').value)||'SOXL').trim().toUpperCase();}
+    catch(e){return 'SOXL';}
+  }
+  function selectedDate(btn){
+    return btn&&btn.id==='mainAutoCloseBtn'
+      ? String((byId('date')&&byId('date').value)||'')
+      : String((byId('m_date')&&byId('m_date').value)||'');
+  }
+  function timed(ms){var c=new AbortController(),t=setTimeout(function(){c.abort();},ms||10000);return{signal:c.signal,done:function(){clearTimeout(t);}};}
+  async function jsonFetch(url,ms){var t=timed(ms);try{var r=await fetch(url,{cache:'no-store',signal:t.signal,headers:{Accept:'application/json'}});if(!r.ok)throw new Error('HTTP '+r.status);return await r.json();}finally{t.done();}}
+  function status(msg,bad){['autoCloseStatus','mainAutoCloseStatus'].forEach(function(id){var el=byId(id);if(el){el.textContent=msg||'';el.style.color=bad?'#d45b5b':'#756f88';}});}
+  async function fromYahooHistory(ticker,date){
+    var url=new URL('./data/close-history.json',document.baseURI);url.searchParams.set('_',Date.now());
+    var data=await jsonFetch(url.toString(),8000);
+    if(String(data&&data.ticker||'').toUpperCase()!==ticker)throw new Error('동기화 종목 불일치');
+    var close=Number(data&&data.quotes&&data.quotes[date]);
+    if(!(close>0))throw new Error('선택일이 Yahoo 동기화 이력에 없음');
+    return{ticker:ticker,date:date,close:close,source:data.source||'Yahoo Finance 동기화',updatedAt:data.updated_at||'',via:'actions'};
+  }
+  function nyDate(ts){
+    var parts=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(Number(ts)*1000));
+    var out={};parts.forEach(function(p){out[p.type]=p.value;});return out.year+'-'+out.month+'-'+out.day;
+  }
+  function unixDate(date,delta){var d=new Date(date+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+(delta||0));return Math.floor(d.getTime()/1000);}
+  function parseYahoo(data,ticker,date){
+    var r=data&&data.chart&&data.chart.result&&data.chart.result[0];if(!r)throw new Error('Yahoo 응답 없음');
+    var ts=r.timestamp||[],q=r.indicators&&r.indicators.quote&&r.indicators.quote[0]||{},closes=q.close||[];
+    for(var i=0;i<Math.min(ts.length,closes.length);i++){var c=Number(closes[i]);if(c>0&&nyDate(ts[i])===date)return{ticker:ticker,date:date,close:c,source:'Yahoo Finance 직접 조회',updatedAt:'',via:'direct'};}
+    throw new Error('Yahoo에 선택일 확정 종가 없음');
+  }
+  async function directYahoo(ticker,date){
+    var query='?period1='+unixDate(date,-1)+'&period2='+unixDate(date,2)+'&interval=1d&includePrePost=false&events=div%2Csplits';
+    var raw1='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ticker)+query;
+    var raw2='https://query2.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ticker)+query;
+    var urls=[raw1,raw2,'https://api.allorigins.win/raw?url='+encodeURIComponent(raw1)];
+    var last=null;for(var i=0;i<urls.length;i++){try{return parseYahoo(await jsonFetch(urls[i],10000),ticker,date);}catch(e){last=e;}}
+    throw last||new Error('Yahoo 브라우저 조회 실패');
+  }
+  async function exactClose(ticker,date){
+    var errors=[];
+    try{return await fromYahooHistory(ticker,date);}catch(e){errors.push(e.message);}
+    try{return await directYahoo(ticker,date);}catch(e){errors.push(e.message);}
+    throw new Error(errors.join(' / '));
+  }
+  function apply(date,close){
+    var v=Number(close).toFixed(2),md=byId('m_date'),d=byId('date'),mc=byId('m_close'),c=byId('close');
+    if(md)md.value=date;if(d)d.value=date;if(mc){mc.value=v;mc.dataset.autoLoadedDate=date;}if(c){c.value=v;c.dataset.autoLoadedDate=date;}
+    try{if(typeof autoSelectFromClose==='function')autoSelectFromClose(true);}catch(e){}
+    try{if(typeof fillModalChoices==='function')fillModalChoices();}catch(e){}
+    try{if(typeof updateSelectedAction==='function')updateSelectedAction();}catch(e){}
+    try{if(typeof estimateTForInput==='function')estimateTForInput();}catch(e){}
+  }
+  async function load(btn){
+    var date=selectedDate(btn);if(!date){status('먼저 날짜를 선택하세요.',true);alert('먼저 날짜를 선택해 주세요.');return;}
+    var old=btn.textContent;
+    try{btn.disabled=true;btn.textContent='Yahoo 조회 중...';status(date+' Yahoo 확정 종가를 조회 중입니다.',false);var q=await exactClose(tickerNow(),date);apply(date,q.close);var u=q.updatedAt?(' · 동기화 '+q.updatedAt.replace('T',' ').replace('Z',' UTC')):'';status(q.ticker+' '+date+' 종가 '+Number(q.close).toFixed(2)+' · '+q.source+u,false);}
+    catch(e){console.error(e);status(date+' 확정 종가가 없습니다. Actions에서 Yahoo 동기화를 실행하세요.',true);alert(date+'의 확정 종가를 찾지 못했습니다.\n\n주말·휴장일이거나 Yahoo 동기화 전일 수 있습니다. GitHub Actions의 “Sync Yahoo SOXL prices”를 실행한 뒤 다시 시도하세요.');}
+    finally{btn.disabled=false;btn.textContent=old||'선택일 종가 불러오기';}
+  }
+  function bindBtn(id){var b=byId(id);if(!b)return;b.textContent='선택일 종가 불러오기';b.onclick=function(e){e.preventDefault();load(b);};b.dataset.yahooV13='1';}
+  function bindDate(dateId,closeId){var d=byId(dateId),c=byId(closeId);if(!d||d.dataset.yahooV13)return;d.dataset.yahooV13='1';d.addEventListener('change',function(){if(c&&c.dataset.autoLoadedDate&&c.dataset.autoLoadedDate!==d.value){c.value='';delete c.dataset.autoLoadedDate;}status(d.value?d.value+' 선택 · Yahoo 종가를 불러오세요.':'날짜를 먼저 선택하세요.',false);});}
+  function setup(){bindBtn('autoCloseBtn');bindBtn('mainAutoCloseBtn');bindDate('m_date','m_close');bindDate('date','close');var s=byId('autoCloseStatus');if(s)s.textContent='GitHub Actions가 Yahoo Finance에서 동기화한 선택일 종가를 불러옵니다.';}
+  document.addEventListener('DOMContentLoaded',setup);setup();new MutationObserver(setup).observe(document.documentElement,{childList:true,subtree:true});
+})();
+</script>
+
+
 <script>
 (function(){
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {

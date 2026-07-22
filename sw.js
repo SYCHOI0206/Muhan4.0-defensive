@@ -1,4 +1,4 @@
-const CACHE_NAME = 'soxl-v4-defensive-25-5-v11-order-qty';
+const CACHE_NAME = 'soxl-v4-defensive-25-5-v13-yahoo-sync';
 const APP_SHELL = [
   './',
   './index.html',
@@ -32,17 +32,17 @@ self.addEventListener('fetch', event => {
 
   if (url.origin === location.origin) {
     // Quote JSON must never be served cache-first because the daily value changes.
-    if (url.pathname.endsWith('/data/latest-close.json')) {
+    if (url.pathname.endsWith('/data/latest-close.json') || url.pathname.endsWith('/data/close-history.json')) {
       event.respondWith(
         fetch(req, { cache: 'no-store' })
           .then(res => {
             if (res.ok) {
               const copy = res.clone();
-              caches.open(CACHE_NAME).then(cache => cache.put('./data/latest-close.json', copy));
+              caches.open(CACHE_NAME).then(cache => cache.put(req, copy));
             }
             return res;
           })
-          .catch(() => caches.match('./data/latest-close.json'))
+          .catch(() => caches.match(req))
       );
       return;
     }
