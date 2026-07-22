@@ -7,7 +7,7 @@
 
   const Core = window.V40DefensiveCore;
   window.__V40_DEFENSIVE_PATCH_ACTIVE__ = true;
-  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v10-ergonomic-crash-reminder-pnl';
+  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v11-order-qty-per-line';
   const ACTION_CRASH = 'CRASH_FOLLOWUP_BUY';
   window.__v40ManualChoice = false;
 
@@ -316,7 +316,7 @@
         if(x.kind==='buy'&&typeof simpleBuyExtraRows==='function'){
           const extras=simpleBuyExtraRows(x)||[];
           for(const r of extras){
-            items.push(`<div class="choice ladderChoice"><strong>+1주 LOC</strong><small>${price(r.px)}</small><span class="tag hideQtyTag">총 ${qty(r.total||((x.q||0)+1))}주</span></div>`);
+            items.push(`<div class="choice ladderChoice"><strong>추가 1주 LOC</strong><small>${price(r.px)}</small><span class="tag hideQtyTag">1주</span></div>`);
           }
         }
       }
@@ -356,7 +356,7 @@
      - direct buy/sell selection is optional and collapsed
      - no warning popup for combined star+average buy
   */
-  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v10-ergonomic-crash-reminder-pnl';
+  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v11-order-qty-per-line';
   window.__v40QtyEdited = false;
 
   function unitAmountForState(a,s){
@@ -562,6 +562,8 @@
   };
 
   // Guarantee a single LOC ladder: front-half ladder is displayed only once below the average-price row.
+  // Display rule v11: every row shows only the quantity to order at that exact price.
+  // Base rows keep their calculated order quantity; each ladder row is always an additional 1-share LOC order.
   window.simpleBuyExtraRows=function(x){
     if(!x||x.kind!=='buy'||x.noLadder)return [];
     if(x.avgLadder&&typeof ladderRowsFromUnit==='function')return ladderRowsFromUnit(x.ladderUnit,x.ladderBaseTotal,x.avgLimit,7);
@@ -576,7 +578,7 @@
     const btn=x.action==='AUTO'?'':`<button class="secondary quickRecordBtn" data-useorder="${enc}" data-action="${x.action}" data-price="${x.px==null?'':x.px}" data-qty="${recQty==null?'':recQty}" type="button">기록</button>`;
     let html=`<div class="order ${p} simpleOrder"><div class="simpleLeft"><span class="simpleName">${esc(x.name)}</span><span class="pill ${p}">${p==='buy'?'LOC':p==='sell'?'LOC':p==='stop'?'지정가':'참고'}</span></div><div class="simpleRight"><b>${x.px==null?'—':price(x.px)}</b>${qtxt?`<span>${qtxt}</span>`:''}${btn}</div></div>`;
     const extras=simpleBuyExtraRows(x);
-    html+=extras.map(r=>`<div class="order buy simpleOrder ladderExtra"><div class="simpleLeft"><span class="simpleName">추가 1주 LOC</span><span class="pill info">LOC</span></div><div class="simpleRight"><b>${price(r.px)}</b><span>총 ${qty(r.total||0)}주</span></div></div>`).join('');
+    html+=extras.map(r=>`<div class="order buy simpleOrder ladderExtra"><div class="simpleLeft"><span class="simpleName">추가 1주 LOC</span><span class="pill info">LOC</span></div><div class="simpleRight"><b>${price(r.px)}</b><span>1주</span></div></div>`).join('');
     return html;
   };
 
