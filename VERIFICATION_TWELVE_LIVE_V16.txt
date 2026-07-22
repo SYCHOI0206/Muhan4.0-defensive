@@ -1,0 +1,17 @@
+SOXL V4 방어형 v16 Twelve Data 실시간 조회 검증
+
+정적 검증
+- 사용자 업로드 index(5).html을 기준으로 수정
+- Twelve Data /price 및 /eod 직접 호출 코드 포함
+- close-history.json 또는 latest-close.json을 v16 조회 함수에서 사용하지 않음
+- 과거 날짜 /eod 응답 datetime이 선택일과 정확히 일치해야만 입력
+- 오늘 뉴욕 16:10 전 /price, 이후 /eod 분기
+- 날짜 변경 시 이전 자동 입력값 제거
+- API Key가 S/settings/백업 JSON에 포함되지 않고 별도 localStorage 키로 관리
+- 프록시 URL이 있으면 API Key 직접 연결보다 우선
+- JavaScript 문법 검사 통과
+- v40_defensive_core.js는 사용자 업로드 파일과 SHA-256 동일
+
+제한
+- 실행환경 외부 네트워크 제한 때문에 실제 Twelve Data 응답은 이 환경에서 확인하지 못함
+- 브라우저 직접 호출이 CORS로 막힐 경우 포함된 Cloudflare Worker 프록시를 사용해야 함

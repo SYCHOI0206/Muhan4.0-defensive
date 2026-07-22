@@ -7,7 +7,7 @@
 
   const Core = window.V40DefensiveCore;
   window.__V40_DEFENSIVE_PATCH_ACTIVE__ = true;
-  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v11-order-qty-per-line';
+  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v16-twelvedata-live';
   const ACTION_CRASH = 'CRASH_FOLLOWUP_BUY';
   window.__v40ManualChoice = false;
 
@@ -356,7 +356,7 @@
      - direct buy/sell selection is optional and collapsed
      - no warning popup for combined star+average buy
   */
-  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v11-order-qty-per-line';
+  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v16-twelvedata-live';
   window.__v40QtyEdited = false;
 
   function unitAmountForState(a,s){

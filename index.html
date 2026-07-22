@@ -1334,6 +1334,213 @@ function simpleBuyExtraRows(x){
 </script>
 
 
+<!-- TWELVE DATA LIVE / EXACT-DATE FETCH V16
+  - No local historical-price file is used.
+  - Past dates: Twelve Data /eod?date=YYYY-MM-DD
+  - Today before final close: Twelve Data /price (live/latest price)
+  - Today after 16:10 New York: Twelve Data /eod?date=today
+  - The API key is stored only in this browser's localStorage, never in strategy backup data.
+  - Optional secure Cloudflare Worker proxy is supported.
+-->
+<script>
+(function(){
+  'use strict';
+  const API_KEY_STORAGE='muhan_twelve_data_api_key_v1';
+  const PROXY_STORAGE='muhan_twelve_data_proxy_url_v1';
+  const SOURCE='Twelve Data';
+
+  function byId(id){return document.getElementById(id);}
+  function clean(s){return String(s||'').trim();}
+  function ticker(){
+    try{return clean((window.S&&S.settings&&S.settings.ticker)||(byId('ticker')&&byId('ticker').value)||'SOXL').toUpperCase()||'SOXL';}
+    catch(e){return 'SOXL';}
+  }
+  function getKey(){return clean(localStorage.getItem(API_KEY_STORAGE));}
+  function getProxy(){return clean(localStorage.getItem(PROXY_STORAGE)).replace(/\/$/,'');}
+  function saveConnection(){
+    const key=byId('ss_twelveApiKey');
+    const proxy=byId('ss_twelveProxyUrl');
+    if(key){
+      const v=clean(key.value);
+      if(v)localStorage.setItem(API_KEY_STORAGE,v); else localStorage.removeItem(API_KEY_STORAGE);
+    }
+    if(proxy){
+      const v=clean(proxy.value);
+      if(v)localStorage.setItem(PROXY_STORAGE,v); else localStorage.removeItem(PROXY_STORAGE);
+    }
+  }
+  function syncConnectionFields(){
+    if(byId('ss_twelveApiKey'))byId('ss_twelveApiKey').value=getKey();
+    if(byId('ss_twelveProxyUrl'))byId('ss_twelveProxyUrl').value=getProxy();
+  }
+  function ensureSettings(){
+    const rows=document.querySelector('#settingsSheet .settingRows');
+    if(!rows||byId('ss_twelveApiKey'))return;
+    const keyRow=document.createElement('div');
+    keyRow.className='settingRow';
+    keyRow.innerHTML='<div><b>Twelve Data API Key</b><small>직접 연결용 · 이 브라우저에만 저장되며 백업 파일에는 포함되지 않습니다.</small></div><input id="ss_twelveApiKey" type="password" autocomplete="off" placeholder="API Key 입력">';
+    const proxyRow=document.createElement('div');
+    proxyRow.className='settingRow';
+    proxyRow.innerHTML='<div><b>보안 프록시 URL (선택)</b><small>Cloudflare Worker를 쓰면 API Key를 브라우저에 보관하지 않습니다.</small></div><input id="ss_twelveProxyUrl" type="url" inputmode="url" placeholder="https://...workers.dev">';
+    const testRow=document.createElement('div');
+    testRow.className='settingRow';
+    testRow.innerHTML='<div><b>Twelve Data 연결</b><small id="twelveConnectionStatus">API Key 또는 프록시 URL을 설정하세요.</small></div><button class="secondary" id="testTwelveConnection" type="button">연결 테스트</button>';
+    rows.appendChild(keyRow); rows.appendChild(proxyRow); rows.appendChild(testRow);
+    syncConnectionFields();
+    byId('testTwelveConnection').onclick=async function(){
+      saveConnection();
+      const st=byId('twelveConnectionStatus');
+      try{
+        st.textContent='SOXL 실시간 가격을 조회 중입니다.';
+        const q=await fetchTwelve('price',ticker(),'');
+        st.textContent='연결 성공 · SOXL '+Number(q.price).toFixed(2);
+        st.style.color='#2f9b70';
+      }catch(e){
+        st.textContent='연결 실패 · '+friendlyError(e);
+        st.style.color='#d45b5b';
+      }
+    };
+    const apply=byId('applySettingsSheet');
+    if(apply&&!apply.dataset.twelveLiveV16){
+      apply.dataset.twelveLiveV16='1';
+      apply.addEventListener('click',saveConnection,true);
+    }
+    const nav=byId('navSettings');
+    if(nav&&!nav.dataset.twelveLiveV16){
+      nav.dataset.twelveLiveV16='1';
+      nav.addEventListener('click',function(){setTimeout(syncConnectionFields,0);},true);
+    }
+  }
+
+  function nyParts(){
+    const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false,weekday:'short'}).formatToParts(new Date());
+    const o={}; parts.forEach(p=>o[p.type]=p.value);
+    return {date:o.year+'-'+o.month+'-'+o.day,hour:Number(o.hour),minute:Number(o.minute),weekday:o.weekday};
+  }
+  function selectedDate(btn){
+    return btn&&btn.id==='mainAutoCloseBtn'?clean(byId('date')&&byId('date').value):clean(byId('m_date')&&byId('m_date').value);
+  }
+  function setStatus(msg,error){
+    ['autoCloseStatus','mainAutoCloseStatus'].forEach(id=>{const el=byId(id);if(el){el.textContent=msg||'';el.style.color=error?'#d45b5b':'#756f88';}});
+  }
+  function timeoutFetch(url,options,ms){
+    const ctrl=new AbortController(); const timer=setTimeout(()=>ctrl.abort(),ms||12000);
+    return fetch(url,Object.assign({},options||{},{cache:'no-store',signal:ctrl.signal})).finally(()=>clearTimeout(timer));
+  }
+  async function jsonRequest(url,options){
+    const res=await timeoutFetch(url,options,12000);
+    let data=null; try{data=await res.json();}catch(e){throw new Error('JSON 응답을 읽지 못했습니다.');}
+    if(!res.ok||data&&data.status==='error'){
+      const msg=data&&(data.message||data.code)?String(data.message||data.code):'HTTP '+res.status;
+      const err=new Error(msg); err.code=data&&data.code||res.status; throw err;
+    }
+    return data;
+  }
+  function directUrl(mode,symbol,date,key){
+    const endpoint=mode==='price'?'price':'eod';
+    const u=new URL('https://api.twelvedata.com/'+endpoint);
+    u.searchParams.set('symbol',symbol);
+    if(mode==='eod')u.searchParams.set('date',date);
+    u.searchParams.set('dp','8');
+    u.searchParams.set('apikey',key);
+    return u.toString();
+  }
+  function proxyUrl(base,mode,symbol,date){
+    const u=new URL(base);
+    u.searchParams.set('mode',mode);u.searchParams.set('symbol',symbol);
+    if(date)u.searchParams.set('date',date);
+    return u.toString();
+  }
+  async function fetchTwelve(mode,symbol,date){
+    const proxy=getProxy();
+    if(proxy)return jsonRequest(proxyUrl(proxy,mode,symbol,date),{headers:{Accept:'application/json'}});
+    const key=getKey();
+    if(!key)throw new Error('Twelve Data API Key가 없습니다. 설정에서 입력하세요.');
+    return jsonRequest(directUrl(mode,symbol,date,key),{headers:{Accept:'application/json'}});
+  }
+  function validateEod(data,date){
+    const returned=clean(data&&data.datetime).slice(0,10);
+    const close=Number(data&&data.close);
+    if(!(close>0))throw new Error('종가 데이터가 없습니다.');
+    if(returned!==date)throw new Error('선택한 날짜는 거래일이 아니거나 해당 날짜 데이터가 없습니다.');
+    return {value:close,label:'확정 종가',source:SOURCE+' /eod'};
+  }
+  function validatePrice(data){
+    const value=Number(data&&data.price);
+    if(!(value>0))throw new Error('실시간 가격 데이터가 없습니다.');
+    return {value,label:'실시간 현재가 · 종가 미확정',source:SOURCE+' /price'};
+  }
+  function applyValue(date,q){
+    const value=Number(q.value).toFixed(2);
+    const md=byId('m_date'),dd=byId('date'),mc=byId('m_close'),dc=byId('close');
+    if(md)md.value=date;if(dd)dd.value=date;
+    if(mc){mc.value=value;mc.dataset.autoLoadedDate=date;mc.dataset.quoteKind=q.label;}
+    if(dc){dc.value=value;dc.dataset.autoLoadedDate=date;dc.dataset.quoteKind=q.label;}
+    try{if(typeof autoSelectFromClose==='function')autoSelectFromClose(true);}catch(e){}
+    try{if(typeof fillModalChoices==='function')fillModalChoices();}catch(e){}
+    try{if(typeof updateSelectedAction==='function')updateSelectedAction();}catch(e){}
+    try{if(typeof estimateTForInput==='function')estimateTForInput();}catch(e){}
+  }
+  function friendlyError(e){
+    const msg=String(e&&e.message||e||'알 수 없는 오류');
+    if(String(e&&e.code)==='401'||/api key|apikey|unauthorized/i.test(msg))return 'API Key를 확인하세요.';
+    if(String(e&&e.code)==='429'||/rate|credit|limit/i.test(msg))return 'API 호출 한도를 초과했습니다. 잠시 후 다시 시도하세요.';
+    if(/Failed to fetch|NetworkError|CORS/i.test(msg))return '브라우저 직접 연결이 차단됐습니다. 포함된 Cloudflare Worker 프록시를 설정하세요.';
+    return msg;
+  }
+  async function loadSelected(btn){
+    const date=selectedDate(btn); const symbol=ticker();
+    if(!date){alert('먼저 날짜를 선택해 주세요.');return;}
+    const now=nyParts();
+    if(date>now.date){alert('미국시장 기준 미래 날짜의 시세는 불러올 수 없습니다.');return;}
+    const old=btn.textContent;
+    try{
+      saveConnection(); btn.disabled=true;btn.textContent='Twelve Data 조회 중...';
+      let q;
+      if(date===now.date){
+        const afterClose=(now.hour>16)||(now.hour===16&&now.minute>=10);
+        if(afterClose){
+          setStatus(date+' 확정 종가를 Twelve Data에서 조회 중입니다.',false);
+          q=validateEod(await fetchTwelve('eod',symbol,date),date);
+        }else{
+          setStatus(date+' 실시간 현재가를 Twelve Data에서 조회 중입니다.',false);
+          q=validatePrice(await fetchTwelve('price',symbol,date));
+        }
+      }else{
+        setStatus(date+' 확정 종가를 Twelve Data에서 조회 중입니다.',false);
+        q=validateEod(await fetchTwelve('eod',symbol,date),date);
+      }
+      applyValue(date,q);
+      setStatus(symbol+' '+date+' '+q.label+' '+Number(q.value).toFixed(2)+' 불러옴 · '+q.source,false);
+    }catch(e){
+      console.error('Twelve Data live fetch failed',e);
+      const msg=friendlyError(e);setStatus('조회 실패 · '+msg,true);alert('Twelve Data 시세 조회에 실패했습니다.\n\n'+msg);
+    }finally{btn.disabled=false;btn.textContent=old||'선택일 시세 불러오기';}
+  }
+  function bindButton(id){
+    const btn=byId(id);if(!btn)return;
+    btn.textContent='선택일 시세 불러오기';
+    btn.dataset.twelveLiveV16='1';
+    btn.onclick=function(e){e.preventDefault();loadSelected(btn);};
+  }
+  function bindDate(dateId,closeId){
+    const d=byId(dateId),c=byId(closeId);if(!d||d.dataset.twelveLiveV16)return;
+    d.dataset.twelveLiveV16='1';
+    d.addEventListener('change',function(){
+      if(c&&c.dataset.autoLoadedDate&&c.dataset.autoLoadedDate!==d.value){c.value='';delete c.dataset.autoLoadedDate;delete c.dataset.quoteKind;}
+      setStatus(d.value?d.value+'을 선택했습니다. Twelve Data에서 즉시 조회합니다.':'날짜를 먼저 선택하세요.',false);
+    });
+  }
+  function setup(){
+    ensureSettings();bindButton('autoCloseBtn');bindButton('mainAutoCloseBtn');bindDate('m_date','m_close');bindDate('date','close');
+    const a=byId('autoCloseStatus');if(a&&!a.dataset.twelveLiveV16){a.dataset.twelveLiveV16='1';a.textContent='선택일은 Twelve Data /eod, 오늘 장중은 /price로 즉시 조회합니다.';}
+  }
+  document.addEventListener('DOMContentLoaded',setup);setup();
+  new MutationObserver(setup).observe(document.documentElement,{childList:true,subtree:true});
+})();
+</script>
+
+
 <script>
 (function(){
   function byId(id){return document.getElementById(id)}

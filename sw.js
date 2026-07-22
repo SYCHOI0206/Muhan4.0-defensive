@@ -1,4 +1,4 @@
-const CACHE_NAME = 'soxl-v4-defensive-25-5-v11-order-qty';
+const CACHE_NAME = 'soxl-v4-defensive-25-5-v16-twelvedata-live';
 const APP_SHELL = [
   './',
   './index.html',

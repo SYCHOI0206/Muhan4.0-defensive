@@ -1,0 +1,9 @@
+v16에서는 GitHub Actions/로컬 JSON 시세 동기화를 사용하지 않습니다.
+저장소에 남아 있다면 다음 레거시 파일을 삭제하세요.
+
+.github/workflows/update-close.yml
+scripts/update_close.py
+data/latest-close.json
+data/close-history.json
+
+남아 있어도 v16 화면은 읽지 않지만, Actions 메뉴 혼동과 불필요한 자동 커밋을 막기 위해 삭제를 권장합니다.

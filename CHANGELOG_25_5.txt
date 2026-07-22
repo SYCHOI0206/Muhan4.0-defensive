@@ -41,3 +41,12 @@ SOXL V4 방어형 25/5 변경 기록
 - 별지점/평단가 행은 해당 가격 주문수량, 추가 LOC 행은 각 1주로 통일
 - 오늘 기록 모달의 LOC 사다리도 동일하게 각 행 1주 표시
 - 전략 계산 로직은 변경하지 않음
+
+
+[v16-twelvedata-live]
+- 로컬 히스토리/최신 JSON이 아닌 Twelve Data REST를 버튼 클릭 시 즉시 호출
+- 과거 선택일은 /eod exact date, 오늘 장중은 /price 실시간 현재가
+- 오늘 장 마감 후에는 /eod 확정 종가 사용
+- API Key는 브라우저 localStorage에 별도 저장되어 전략 백업에 포함되지 않음
+- 선택형 Cloudflare Worker 보안 프록시 지원
+- 방어형 매매/T/리버스/급락 로직 변경 없음
