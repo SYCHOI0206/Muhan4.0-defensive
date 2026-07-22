@@ -1,0 +1,18 @@
+SOXL V4 방어형 v17 Twelve Data 화면 멈춤 수정
+
+원인
+- v16의 MutationObserver가 문서 전체 변경을 감시함
+- setup()이 매번 버튼 textContent를 다시 기록함
+- textContent 변경이 다시 MutationObserver를 호출함
+- 이 과정이 무한 반복되어 메인 스레드가 점유되고 버튼 클릭이 작동하지 않음
+
+수정
+- 버튼은 dataset 플래그로 최초 1회만 연결
+- 문서 전체 MutationObserver 제거
+- DOMContentLoaded 및 즉시 setup만 사용
+- 서비스워커 캐시 v17로 변경
+
+변경하지 않은 항목
+- Twelve Data /price 및 /eod 호출 방식
+- API Key/프록시 설정
+- 방어형 25/5, 급락 익일 0.25T, 주문수량, T, 실현손익 로직
