@@ -1,4 +1,4 @@
-const CACHE_NAME = 'soxl-v4-defensive-25-5-v9-simple-record';
+const CACHE_NAME = 'soxl-v4-defensive-25-5-v10-ergonomic';
 const APP_SHELL = [
   './',
   './index.html',

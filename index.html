@@ -180,6 +180,24 @@ body{font-size:13px;background:#f5f1fb;padding-bottom:86px}
 .settingRow b{display:block;font-size:15px;color:#2a253a;letter-spacing:-.02em}.settingRow small{display:block;font-size:11.5px;color:#7a748b;margin-top:3px;line-height:1.35}.settingRow input,.settingRow select{padding:10px 11px;border-radius:13px;font-size:14px}.settingRows + .sheetActions{margin-top:14px}
 @media(max-width:560px){.settingRow{grid-template-columns:1fr}.settingsSheetPanel{max-height:86vh}.nav a{cursor:pointer}}
 
+
+/* ergonomic dashboard + crash-followup reminder v10 */
+.hero>#crashFollowupBanner{grid-column:1/-1;margin-top:2px}
+.crashReminder{border:1.5px solid #efc46f;background:linear-gradient(135deg,#fff9e8,#fff2d0);border-radius:16px;padding:12px 13px;color:#5f4310;box-shadow:0 8px 20px rgba(172,116,17,.08)}
+.crashReminder .crashTitle{display:flex;align-items:center;gap:7px;font-size:14px;font-weight:950;letter-spacing:-.02em}
+.crashReminder .crashMain{margin-top:5px;font-size:13px;font-weight:900;line-height:1.45}
+.crashReminder .crashSub{margin-top:4px;font-size:11.5px;font-weight:800;color:#7d622d;line-height:1.45}
+.crashReminder .crashPill{display:inline-flex;align-items:center;border-radius:999px;padding:3px 8px;background:#f3b93f;color:#4e3500;font-size:10.5px;font-weight:950;margin-left:auto;white-space:nowrap}
+.modalCrashReminder{margin:0 0 11px}
+.metric .val.pnlPositive{color:var(--green)}
+.metric .val.pnlNegative{color:var(--red)}
+.metric .val.pnlNeutral{color:#756f88}
+.cyclePnlMetric .lab{line-height:1.25}
+#defensiveStatus{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 11px!important;line-height:1.35!important}
+#defensiveStatus .statusChip{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;background:#f1ebfb;color:#6254c4;font-size:10.5px;font-weight:900}
+.simpleQtyNote.crashQtyNote{background:#fff7df;border-color:#efc46f;color:#6d4d0d}
+@media(max-width:560px){.crashReminder{padding:11px 12px}.crashReminder .crashTitle{font-size:13.5px}.crashReminder .crashMain{font-size:12.5px}.metric .val#cycleRealizedPnl,.metric .val#totalAsset{font-size:14.5px}}
+
 </style>
 </head>
 <body>
@@ -187,7 +205,22 @@ body{font-size:13px;background:#f5f1fb;padding-bottom:86px}
 <div class="wrap">
 <nav class="nav"><a href="#overview" data-tab="overview">현재</a><a href="#orders" data-tab="orders">주문표</a><a href="#record" id="navRecord">오늘 기록</a><a href="#history" data-tab="history">기록</a><a href="#rules" data-tab="rules">표준 로직</a><a href="#settings" id="navSettings">설정</a></nav>
 
-<section class="card hero" id="overview"><div><div class="small">현재 T</div><div><span class="bigT" id="curT">0.00</span><span style="font-size:24px;font-weight:900;color:#8b849c"> / 20</span></div><div class="progress"><span id="tbar"></span></div><div style="margin-top:12px"><span class="phase" id="phase">대기</span></div></div><div class="metrics"><div class="metric"><div class="lab">모드</div><div class="val" id="mode">NORMAL</div></div><div class="metric"><div class="lab">평단</div><div class="val" id="avg">—</div></div><div class="metric"><div class="lab">보유수량</div><div class="val" id="shares">0</div></div><div class="metric"><div class="lab">현금</div><div class="val" id="cash">$0</div></div><div class="metric"><div class="lab">평가액</div><div class="val" id="equity">$0</div></div><div class="metric"><div class="lab">수익률</div><div class="val" id="pnl">—</div></div><div class="metric"><div class="lab">1회매수금</div><div class="val" id="cycle">—</div></div><div class="metric"><div class="lab">최근 종가</div><div class="val" id="lastClose">—</div></div></div></section>
+<section class="card hero" id="overview">
+  <div class="heroT"><div class="small">현재 T</div><div><span class="bigT" id="curT">0.00</span><span style="font-size:24px;font-weight:900;color:#8b849c"> / 20</span></div><div class="progress"><span id="tbar"></span></div><div style="margin-top:12px"><span class="phase" id="phase">대기</span></div></div>
+  <div class="metrics">
+    <div class="metric"><div class="lab">모드</div><div class="val" id="mode">NORMAL</div></div>
+    <div class="metric"><div class="lab">평단</div><div class="val" id="avg">—</div></div>
+    <div class="metric"><div class="lab">보유수량</div><div class="val" id="shares">0</div></div>
+    <div class="metric"><div class="lab">현금</div><div class="val" id="cash">$0</div></div>
+    <div class="metric"><div class="lab">보유 평가액</div><div class="val" id="equity">$0</div></div>
+    <div class="metric"><div class="lab">총자산</div><div class="val" id="totalAsset">$0</div></div>
+    <div class="metric"><div class="lab">수익률</div><div class="val" id="pnl">—</div></div>
+    <div class="metric cyclePnlMetric"><div class="lab" id="cycleRealizedLabel">이번 사이클 실현손익</div><div class="val" id="cycleRealizedPnl">$0.00</div></div>
+    <div class="metric"><div class="lab">1회매수금</div><div class="val" id="cycle">—</div></div>
+    <div class="metric"><div class="lab">최근 종가</div><div class="val" id="lastClose">—</div></div>
+  </div>
+  <div id="crashFollowupBanner" class="crashReminder hidden" role="status" aria-live="polite"></div>
+</section>
 
 <section class="grid" id="orders"><div class="card"><h2>매도 주문표 <span class="sub">전량 · 쿼터 · 리버스</span></h2><div class="orders" id="sellOrders"></div></div><div class="card"><h2>매수 주문표 <span class="sub">LOC 종가 기준</span></h2><div class="orders" id="buyOrders"></div></div></section>
 
@@ -212,6 +245,7 @@ body{font-size:13px;background:#f5f1fb;padding-bottom:86px}
       <div><div class="sheetTitle" id="sheetTitle">오늘의 거래 기록</div><div class="sheetSub" id="sheetDateLabel">오늘</div></div>
       <button class="xbtn" id="closeRecordSheet" type="button">×</button>
     </div>
+    <div id="modalCrashFollowupBanner" class="crashReminder modalCrashReminder hidden" role="status" aria-live="polite"></div>
     <div class="compactFields simpleRecordFields">
       <div><label>날짜</label><input id="m_date" type="date"></div>
       <div><label>종가</label><input id="m_close" type="number" step="0.01" placeholder="예: 300.77"></div>

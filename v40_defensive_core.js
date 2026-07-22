@@ -50,6 +50,8 @@
       pendingCrashFollowup: false,
       reverseBuckets: [],
       reverseBucketSeq: 0,
+      cycleRealizedPnl: 0,
+      lastCycleRealizedPnl: null,
       cycleDay: 0
     };
   }
@@ -63,6 +65,8 @@
   }
 
   function resetPosition(state){
+    state.lastCycleRealizedPnl = num(state.cycleRealizedPnl, 0);
+    state.cycleRealizedPnl = 0;
     state.shares = 0;
     state.avg = null;
     state.T = 0;
@@ -98,6 +102,8 @@
     const p = num(price, 0);
     const q = Math.max(0, Math.min(Math.floor(num(qty, 0)), Math.floor(num(state.shares, 0))));
     if (p <= 0 || q <= 0) return 0;
+    const averageCost = num(state.avg, 0);
+    state.cycleRealizedPnl = num(state.cycleRealizedPnl, 0) + q * (p - averageCost);
     state.cash += q * p;
     state.shares -= q;
     return q;

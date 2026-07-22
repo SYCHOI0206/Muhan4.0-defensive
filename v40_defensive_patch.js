@@ -7,7 +7,7 @@
 
   const Core = window.V40DefensiveCore;
   window.__V40_DEFENSIVE_PATCH_ACTIVE__ = true;
-  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v9-simple-record-single-ladder';
+  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v10-ergonomic-crash-reminder-pnl';
   const ACTION_CRASH = 'CRASH_FOLLOWUP_BUY';
   window.__v40ManualChoice = false;
 
@@ -349,14 +349,14 @@
   };
 
 
-  /* v9 simple record workflow
+  /* v10 ergonomic record workflow
      - visible automatic recommendation card removed
      - close input calculates one-unit buy quantity (editable)
      - combined front-half buy uses pooled one-unit budget / close
      - direct buy/sell selection is optional and collapsed
      - no warning popup for combined star+average buy
   */
-  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v9-simple-record-single-ladder';
+  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v10-ergonomic-crash-reminder-pnl';
   window.__v40QtyEdited = false;
 
   function unitAmountForState(a,s){
@@ -365,8 +365,14 @@
   function simpleRecordPlan(dateVal,closeVal){
     const st=stateBeforeDate(dateVal||today()),a=st.a,s=settingsNow(),pv=priorValues(st.prior),c=Number(closeVal);
     const unit=unitAmountForState(a,s);
-    const refQty=c>0?Math.floor(Math.min(unit,a.cash)/c):0;
-    if(!(c>0))return {action:'AUTO',qty:'',price:'',unit,refQty:0,before:a,after:clone(a),events:[]};
+    const pendingCrash=Boolean(a.pendingCrashFollowup);
+    const orderSet=Core.buildOrders(a,pv,s);
+    const crashOrder=orderSet.buys.find(x=>x.action===ACTION_CRASH)||null;
+    const crashLoc=crashOrder&&Number(crashOrder.px)>0?Number(crashOrder.px):null;
+    const crashBudget=crashOrder?Math.min(Number(crashOrder.budget)||0,Number(a.cash)||0):0;
+    const normalRefQty=c>0?Math.floor(Math.min(unit,a.cash)/c):0;
+    const refQty=pendingCrash&&crashBudget>0&&c>0?Math.floor(crashBudget/c):normalRefQty;
+    if(!(c>0))return {action:'AUTO',qty:'',price:'',unit,refQty:0,normalRefQty:0,pendingCrash,crashOrder,crashLoc,crashBudget,before:a,after:clone(a),events:[]};
 
     const after=clone(a);
     const result=Core.processDay(after,c,pv,s);
@@ -378,31 +384,70 @@
 
     if(hasStar&&hasAvg&&actions.every(x=>['FRONT_별지점_BUY','FRONT_평단가_BUY'].includes(x))){
       action='FRONT_BOTH_BUY';
-      // Pool both half-budgets so integer-share remainder is not lost.
       q=Math.floor(Math.min(unit,a.cash)/c);
     }else if(trades.length===1){
       action=trades[0].action||'CLOSE_ONLY';
       if(action==='FIRST_BUY')q=Math.floor(Math.min(a.cash/s.split,a.cash)/c);
       else if(action==='FRONT_별지점_BUY'||action==='FRONT_평단가_BUY')q=Math.floor(Math.min(unit/2,a.cash)/c);
       else if(action==='BACK_별지점_BUY')q=Math.floor(Math.min(unit,a.cash)/c);
-      else if(action===ACTION_CRASH)q=Math.floor(Math.min(unit*s.followupT,a.cash)/c);
+      else if(action===ACTION_CRASH)q=Math.floor(Math.min(crashBudget||unit*s.followupT,a.cash)/c);
       else if(action==='REV_BUY'){
         const info=Core.reverseBudgetInfo(a,c,pv,s);
         q=Math.floor(Math.min(info.budget,a.cash)/c);
       }else q=Math.max(0,Math.floor(Number(trades[0].qty)||0));
     }else if(trades.length>1){
-      // Keep compound non-buy days on the verified automatic engine.
       action='AUTO';
       const buyQty=trades.filter(e=>isNormalBuyAction(e.action)||e.action==='REV_BUY').reduce((sum,e)=>sum+(Number(e.qty)||0),0);
       q=buyQty||refQty;
     }
-    return {action,qty:Math.max(0,Math.floor(q||0)),price:c,unit,refQty,before:a,after,events:result.events};
+    if(pendingCrash&&crashOrder&&action==='CLOSE_ONLY')q=0;
+    return {action,qty:Math.max(0,Math.floor(q||0)),price:c,unit,refQty,normalRefQty,pendingCrash,crashOrder,crashLoc,crashBudget,before:a,after,events:result.events};
+  }
+
+  function crashReminderMarkup(plan,c){
+    if(!plan||!plan.pendingCrash||!plan.crashOrder)return '';
+    const loc=Number(plan.crashLoc)||0,budget=Number(plan.crashBudget)||0;
+    const suggested=c>0&&loc>0&&c<=loc?Math.floor(Math.min(budget,plan.before.cash)/c):0;
+    let status='종가 입력 전';
+    if(c>0){
+      if(plan.action==='FULL_SELL')status='전량매도 우선 · 0.25T 주문 취소';
+      else if(plan.action==='QUARTER_SELL')status='쿼터매도 구간 · 0.25T 미체결 예상';
+      else status=c<=loc?`체결 구간 · ${qty(suggested)}주 제안`:'LOC 위 · 미체결 예상';
+    }
+    return `<div class="crashTitle"><span>⚠ 급락 익일 방어 주문</span><span class="crashPill">0.25T</span></div><div class="crashMain">오늘은 정상 1회매수 대신 <b>25% 수량만</b> 사용합니다.</div><div class="crashSub">LOC ${price(loc)} 이하 · 예산 ${money(budget)} · ${status}</div>`;
+  }
+
+  function updateModalCrashReminder(plan,c){
+    const el=$('modalCrashFollowupBanner');
+    if(!el)return;
+    const html=crashReminderMarkup(plan,c);
+    if(html){el.innerHTML=html;el.classList.remove('hidden');}
+    else{el.innerHTML='';el.classList.add('hidden');}
   }
 
   function updateQtyNote(plan,c){
     const el=$('qtyCalcNote');
     if(!el)return;
-    if(!(c>0)){el.textContent='종가를 입력하면 1회매수금 ÷ 종가로 수량을 계산합니다.';return;}
+    updateModalCrashReminder(plan,c);
+    el.classList.toggle('crashQtyNote',Boolean(plan&&plan.pendingCrash));
+    if(!(c>0)){
+      el.textContent=plan&&plan.pendingCrash?'급락 익일입니다. 종가를 입력하면 0.25T 예산으로 수량을 계산합니다.':'종가를 입력하면 1회매수금 ÷ 종가로 수량을 계산합니다.';
+      return;
+    }
+    if(plan&&plan.pendingCrash&&plan.crashOrder){
+      const loc=Number(plan.crashLoc)||0,budget=Number(plan.crashBudget)||0;
+      if(plan.action==='FULL_SELL'){
+        el.textContent='급락 익일 예약보다 전량매도가 우선되어 0.25T 주문은 취소됩니다.';
+      }else if(plan.action==='QUARTER_SELL'){
+        el.textContent='급락 익일이지만 현재 종가는 쿼터매도 구간이라 0.25T LOC는 미체결 예상입니다.';
+      }else if(c<=loc){
+        const q=Math.floor(Math.min(budget,plan.before.cash)/c);
+        el.textContent=`급락 익일 0.25T · ${money(budget)} ÷ ${price(c)} = ${qty(q)}주 · 직접 수정 가능`;
+      }else{
+        el.textContent=`급락 익일 0.25T · LOC ${price(loc)}보다 종가가 높아 오늘은 미체결 예상`;
+      }
+      return;
+    }
     el.textContent=`1회매수금 ${money(plan.unit)} ÷ 종가 ${price(c)} = ${qty(plan.refQty)}주 · 수량은 직접 수정할 수 있습니다.`;
   }
 
@@ -551,28 +596,62 @@
     return oldCompactTradeLine(row);
   };
 
+  function signedMoney(value){
+    const x=Number(value);
+    if(!Number.isFinite(x))return '—';
+    const abs=money(Math.abs(x));
+    return x>0?`+${abs}`:x<0?`-${abs}`:money(0);
+  }
+
+  function updateOverviewCrashReminder(a,prior){
+    const el=$('crashFollowupBanner');
+    if(!el)return;
+    if(!a.pendingCrashFollowup){el.innerHTML='';el.classList.add('hidden');return;}
+    const orders=Core.buildOrders(a,priorValues(prior),settingsNow());
+    const order=orders.buys.find(x=>x.action===ACTION_CRASH);
+    const plan={pendingCrash:true,crashOrder:order,crashLoc:order&&order.px,crashBudget:order&&order.budget,before:a};
+    const html=crashReminderMarkup(plan,NaN);
+    if(html){el.innerHTML=html;el.classList.remove('hidden');}
+  }
+
   const oldRender=window.render;
   window.render=function(){
     oldRender();
     const R=replay(),a=R.a;
+    const last=R.prior.length?Number(R.prior[R.prior.length-1].close):0;
+    const holdingValue=Number(a.shares||0)*Number(last||0);
+    const totalAsset=Core.equity(a,last||0);
+    if($('equity'))$('equity').textContent=money(holdingValue);
+    if($('totalAsset'))$('totalAsset').textContent=money(totalAsset);
+
+    const activeCycle=Number(a.shares||0)>0;
+    const realized=activeCycle?Number(a.cycleRealizedPnl||0):a.lastCycleRealizedPnl;
+    const realizedEl=$('cycleRealizedPnl'),realizedLabel=$('cycleRealizedLabel');
+    if(realizedLabel)realizedLabel.textContent=activeCycle?'이번 사이클 실현손익':'최근 사이클 실현손익';
+    if(realizedEl){
+      realizedEl.textContent=signedMoney(realized);
+      realizedEl.className='val '+(!Number.isFinite(Number(realized))?'pnlNeutral':Number(realized)>0?'pnlPositive':Number(realized)<0?'pnlNegative':'pnlNeutral');
+    }
+
     const phase=$('phase');
-    if(phase&&a.pendingCrashFollowup)phase.textContent='급락 익일 0.25T 예약';
+    if(phase&&a.pendingCrashFollowup)phase.textContent='급락 익일 0.25T';
+    updateOverviewCrashReminder(a,R.prior);
+
     let box=$('defensiveStatus');
     if(!box){
       box=document.createElement('div');box.id='defensiveStatus';box.className='note';box.style.marginTop='10px';
       const overview=$('overview');if(overview)overview.appendChild(box);
     }
     if(box){
-      const last=R.prior.length?R.prior[R.prior.length-1].close:null;
-      const ma=last!=null?Core.ma200WithCurrent(priorValues(R.prior.slice(0,-1)),last):null;
+      const ma=last?Core.ma200WithCurrent(priorValues(R.prior.slice(0,-1)),last):null;
       const buckets=Core.ensureReverseBuckets(a),bucketRemain=buckets.reduce((sum,b)=>sum+b.remaining,0);
-      box.innerHTML=`<b>방어형</b> · 급락예약 ${a.pendingCrashFollowup?'<span class="red">있음</span>':'없음'} · MA200 ${ma==null?'—':price(ma)} · 버킷 ${buckets.length}개`;
+      box.innerHTML=`<span class="statusChip">MA200 ${ma==null?'—':price(ma)}</span><span class="statusChip">리버스 버킷 ${buckets.length}개</span>${buckets.length?`<span class="statusChip">잔액 ${money(bucketRemain)}</span>`:''}`;
     }
   };
 
   function ensureReferenceUiStyle(){
-    if(document.getElementById('v8ReferenceUiStyle'))return;
-    const st=document.createElement('style');st.id='v8ReferenceUiStyle';
+    if(document.getElementById('v10ErgonomicUiStyle'))return;
+    const st=document.createElement('style');st.id='v10ErgonomicUiStyle';
     st.textContent='.choice.ladderChoice{padding:8px 12px;margin:-3px 0 5px;background:#eaf7f1;border-color:#d7efe2;cursor:default}.choice.ladderChoice strong{font-size:13px;color:#5f596d}.choice.ladderChoice small{font-size:13px;font-weight:950;color:#2c9a73}.choice.ladderChoice .tag{font-size:11px}.choice small{margin-left:auto;white-space:nowrap}.choiceTitle{margin-top:8px}.manualPriceField{display:none!important}.simpleRecordFields{margin-top:2px}.simpleQtyNote{margin-top:9px;padding:10px 12px;border-radius:13px;background:#f7f3ff;border:1px solid #e4dafa;color:#685f7c;font-size:12px;font-weight:850;line-height:1.45}.manualTradeDetails{margin-top:10px;border-top:1px solid #eee7f7;padding-top:8px}.manualTradeDetails>summary{display:flex;align-items:center;justify-content:space-between;padding:8px 2px;color:#746c85}.manualTradeDetails>summary:after{content:"열기";font-size:11px;background:#f1ebfb;color:#6658c8;border-radius:999px;padding:4px 8px}.manualTradeDetails[open]>summary:after{content:"닫기"}.manualTradeDetails .choiceGroup{margin-top:4px}.sheetActions{margin-top:12px}.ladderExtra .simpleName{font-size:13px}.ladderExtra .simpleRight span{font-size:11.5px}';
     document.head.appendChild(st);
   }
