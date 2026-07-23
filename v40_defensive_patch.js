@@ -7,7 +7,7 @@
 
   const Core = window.V40DefensiveCore;
   window.__V40_DEFENSIVE_PATCH_ACTIVE__ = true;
-  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v16-twelvedata-live';
+  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v18-portfolio-ledger';
   const ACTION_CRASH = 'CRASH_FOLLOWUP_BUY';
   window.__v40ManualChoice = false;
 
@@ -356,7 +356,7 @@
      - direct buy/sell selection is optional and collapsed
      - no warning popup for combined star+average buy
   */
-  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v16-twelvedata-live';
+  window.__V40_DEFENSIVE_PATCH_VERSION__ = 'v18-portfolio-ledger';
   window.__v40QtyEdited = false;
 
   function unitAmountForState(a,s){
@@ -677,6 +677,11 @@
     if($('quickSaveRecord'))$('quickSaveRecord').onclick=modalSave;
     if($('modalCloseOnly'))$('modalCloseOnly').onclick=()=>{setModalAction('CLOSE_ONLY');modalSave();};
   }
+
+  // Read-only bridge for the portfolio ledger. The verified core logic is not changed.
+  window.__v40ApplyManualDay = applyManualDay;
+  window.__v40SettingsNow = settingsNow;
+  window.__v40PriorValues = priorValues;
 
   ensureReferenceUiStyle();
   updateStaticUi();

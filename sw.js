@@ -1,9 +1,10 @@
-const CACHE_NAME = 'soxl-v4-defensive-25-5-v17-twelvedata-live';
+const CACHE_NAME = 'soxl-v4-defensive-25-5-v18-portfolio';
 const APP_SHELL = [
   './',
   './index.html',
   './v40_defensive_core.js',
   './v40_defensive_patch.js',
+  './v40_portfolio_analytics.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png'
